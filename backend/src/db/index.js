@@ -6,6 +6,7 @@ const pool = new Pool({
   user: 'postgres',
   password: 'Glut040618$$',
   database: 'postgres',
+  family: 4, // 🔥 FORÇA IPv4 (ESSA É A CHAVE)
   ssl: {
     rejectUnauthorized: false
   }
