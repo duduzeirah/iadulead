@@ -71,3 +71,8 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server rodando na porta ${PORT}`);
+  });
+}
