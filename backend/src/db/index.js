@@ -1,14 +1,23 @@
-const { Pool } = require('pg');
+const { Pool } = require("pg");
+
+console.log("DB URL:", process.env.DATABASE_URL ? "OK" : "NÃO EXISTE");
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: {
+    rejectUnauthorized: false
+  }
 });
 
-pool.on('error', (err) => {
-  console.error('Erro no pool do banco:', err);
+pool.on("connect", () => {
+  console.log("✅ PostgreSQL conectado");
 });
 
-const query = (text, params) => pool.query(text, params);
+pool.on("error", (err) => {
+  console.error("ERRO DO POOL:", err);
+});
 
-module.exports = { query, pool };
+module.exports = {
+  pool,
+  query: (text, params) => pool.query(text, params),
+};
