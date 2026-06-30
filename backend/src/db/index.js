@@ -1,15 +1,12 @@
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  host: 'db.ridincbkambyxjyjgvzz.supabase.co',
-  port: 5432,
-  user: 'postgres',
-  password: 'Glut040618$$',
-  database: 'postgres',
-  family: 4, // 🔥 FORÇA IPv4 (ESSA É A CHAVE)
-  ssl: {
-    rejectUnauthorized: false
-  }
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+pool.on('error', (err) => {
+  console.error('Erro no pool do banco:', err);
 });
 
 const query = (text, params) => pool.query(text, params);
