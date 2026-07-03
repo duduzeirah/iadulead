@@ -1,18 +1,23 @@
 const { Pool } = require('pg');
 
+console.log('DATABASE_URL existe?', !!process.env.DATABASE_URL);
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
     rejectUnauthorized: false
-  },
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  }
 });
 
-pool.on('error', (err) => {
-  console.error('Erro inesperado no pool do banco:', err);
-});
+pool.connect()
+  .then(client => {
+    console.log('✅ BANCO CONECTOU!');
+    client.release();
+  })
+  .catch(err => {
+    console.error('❌ ERRO AO CONECTAR NO BANCO:');
+    console.error(err);
+  });
 
 module.exports = {
   query: (text, params) => pool.query(text, params),
