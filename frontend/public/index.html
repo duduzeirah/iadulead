@@ -655,9 +655,11 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 // ============================================================
 // PRODUÇÃO: troque pela URL do Render.com depois do deploy
 // Desenvolvimento local: http://localhost:3001
-const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? 'http://localhost:3001/api'
-  : 'https://iadulead-production.up.railway.app/api'; // ← TROQUE AQUI
+const API =
+  (window.location.hostname === 'localhost' ||
+   window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3001/api'
+    : 'https://iadulead-production.up.railway.app/api'; // ← TROQUE AQUI
 
 // ============================================================
 //  STATE
