@@ -57,7 +57,7 @@ app.use('/api/leads', require('./routes/leads'));
 app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/templates', require('./routes/templates'));
 app.use('/api/dashboard', require('./routes/dashboard'));
-
+app.use('/api/whatsapp', require('./routes/whatsapp'));
 // 404
 app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' });
