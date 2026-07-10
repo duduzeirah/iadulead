@@ -10,7 +10,40 @@ router.post('/webhook', async (req, res) => {
 
     const event = req.body.event;
     const data = req.body.data;
+// mensagem enviada pela equipe
+if (
+  event === 'send.message' &&
+  data?.key?.fromMe === true
+) {
 
+  let phone = data.key.remoteJid
+    ?.replace('@s.whatsapp.net', '')
+    ?.replace('@lid', '')
+    ?.replace(/\D/g, '');
+
+  if (!phone.startsWith('55')) {
+    phone = `55${phone}`;
+  }
+
+  await db.query(`
+    UPDATE leads
+    SET
+      status = 'atendendo',
+      updated_at = NOW()
+    WHERE tenant_id = $1
+    AND phone = $2
+    AND status = 'novo'
+  `, [
+    DEFAULT_TENANT_ID,
+    phone
+  ]);
+
+  console.log(`👨‍💼 Lead movido para atendendo: ${phone}`);
+
+  return res.status(200).json({
+    success: true
+  });
+}
     // aceita apenas eventos de mensagem
     if (
       event !== 'messages.upsert' ||
