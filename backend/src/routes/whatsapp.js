@@ -27,9 +27,14 @@ router.post('/webhook', async (req, res) => {
       });
     }
 
-    const phone = data.key?.remoteJid
-      ?.replace('@s.whatsapp.net', '')
-      ?.replace('@lid', '');
+   let phone = data.key.remoteJid
+  ?.replace('@s.whatsapp.net', '')
+  ?.replace('@lid', '')
+  ?.replace(/\D/g, '');
+
+if (!phone.startsWith('55')) {
+  phone = `55${phone}`;
+}
 
     if (!phone) {
       return res.status(200).json({
