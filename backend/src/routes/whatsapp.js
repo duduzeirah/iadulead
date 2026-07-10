@@ -3,11 +3,6 @@ const db = require('../db');
 
 const router = express.Router();
 
-/*
-  COLOQUE AQUI O TENANT DA BARBEARIA
-  Exemplo:
-  const DEFAULT_TENANT_ID = '2c4e58b4-f70a-4f0e-b0a1-6f12d43a9e77';
-*/
 const DEFAULT_TENANT_ID = '31bc576d-0b27-4ea9-8a81-769429dde7ed';
 
 router.post('/webhook', async (req, res) => {
@@ -16,30 +11,30 @@ router.post('/webhook', async (req, res) => {
     const event = req.body.event;
     const data = req.body.data;
 
-    // aceita somente mensagens recebidas
+    // aceita apenas eventos de mensagem
     if (
       event !== 'messages.upsert' ||
-      !data ||
-      data.key?.fromMe === true
+      !data
     ) {
       return res.status(200).json({
         ignored: true
       });
     }
 
-   let phone = data.key.remoteJid
-  ?.replace('@s.whatsapp.net', '')
-  ?.replace('@lid', '')
-  ?.replace(/\D/g, '');
-
-if (!phone.startsWith('55')) {
-  phone = `55${phone}`;
-}
+    let phone = data.key?.remoteJid
+      ?.replace('@s.whatsapp.net', '')
+      ?.replace('@lid', '')
+      ?.replace(/\D/g, '');
 
     if (!phone) {
       return res.status(200).json({
         ignored: true
       });
+    }
+
+    // padroniza todos os números com 55
+    if (!phone.startsWith('55')) {
+      phone = `55${phone}`;
     }
 
     const name =
@@ -48,24 +43,59 @@ if (!phone.startsWith('55')) {
 
     const message =
       data.message?.conversation ||
+      data.message?.extendedTextMessage?.text ||
       '';
 
-    // procura lead existente dentro do tenant correto
-    const existingLead = await db.query(
-      `
+    /*
+      =====================================================
+      MENSAGEM ENVIADA PELA BARBEARIA
+      move automaticamente para ATENDIMENTO
+      =====================================================
+    */
+    if (data.key?.fromMe === true) {
+
+      await db.query(`
+        UPDATE leads
+        SET
+          status = 'atendimento',
+          last_contact_at = NOW(),
+          updated_at = NOW()
+        WHERE tenant_id = $1
+        AND phone = $2
+        AND status = 'novo'
+      `, [
+        DEFAULT_TENANT_ID,
+        phone
+      ]);
+
+      console.log(`🟢 Lead movido para atendimento: ${phone}`);
+
+      return res.status(200).json({
+        moved: true
+      });
+    }
+
+    /*
+      =====================================================
+      PROCURA LEAD EXISTENTE
+      =====================================================
+    */
+    const existingLead = await db.query(`
       SELECT id
       FROM leads
       WHERE tenant_id = $1
       AND phone = $2
       LIMIT 1
-      `,
-      [
-        DEFAULT_TENANT_ID,
-        phone
-      ]
-    );
+    `, [
+      DEFAULT_TENANT_ID,
+      phone
+    ]);
 
-    // cria novo lead
+    /*
+      =====================================================
+      NOVO LEAD
+      =====================================================
+    */
     if (existingLead.rows.length === 0) {
 
       await db.query(`
@@ -102,7 +132,11 @@ if (!phone.startsWith('55')) {
 
     } else {
 
-      // atualiza último contato
+      /*
+        ==========================================
+        LEAD JÁ EXISTE
+        ==========================================
+      */
       await db.query(`
         UPDATE leads
         SET
