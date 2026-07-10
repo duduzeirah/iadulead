@@ -10,41 +10,8 @@ router.post('/webhook', async (req, res) => {
 
     const event = req.body.event;
     const data = req.body.data;
-// mensagem enviada pela equipe
-if (
-  event === 'send.message' &&
-  data?.key?.fromMe === true
-) {
 
-  let phone = data.key.remoteJid
-    ?.replace('@s.whatsapp.net', '')
-    ?.replace('@lid', '')
-    ?.replace(/\D/g, '');
-
-  if (!phone.startsWith('55')) {
-    phone = `55${phone}`;
-  }
-
-  await db.query(`
-    UPDATE leads
-    SET
-      status = 'atendendo',
-      updated_at = NOW()
-    WHERE tenant_id = $1
-    AND phone = $2
-    AND status = 'novo'
-  `, [
-    DEFAULT_TENANT_ID,
-    phone
-  ]);
-
-  console.log(`👨‍💼 Lead movido para atendendo: ${phone}`);
-
-  return res.status(200).json({
-    success: true
-  });
-}
-    // aceita apenas eventos de mensagem
+    // aceita apenas mensagens
     if (
       event !== 'messages.upsert' ||
       !data
@@ -65,7 +32,7 @@ if (
       });
     }
 
-    // padroniza todos os números com 55
+    // padroniza todos os números
     if (!phone.startsWith('55')) {
       phone = `55${phone}`;
     }
@@ -77,20 +44,22 @@ if (
     const message =
       data.message?.conversation ||
       data.message?.extendedTextMessage?.text ||
+      data.message?.imageMessage?.caption ||
+      data.message?.videoMessage?.caption ||
       '';
 
     /*
-      =====================================================
-      MENSAGEM ENVIADA PELA BARBEARIA
-      move automaticamente para ATENDIMENTO
-      =====================================================
+    =====================================================
+    MENSAGEM ENVIADA PELA EQUIPE
+    =====================================================
     */
+
     if (data.key?.fromMe === true) {
 
       await db.query(`
         UPDATE leads
         SET
-          status = 'atendimento',
+          status = 'atendendo',
           last_contact_at = NOW(),
           updated_at = NOW()
         WHERE tenant_id = $1
@@ -101,7 +70,7 @@ if (
         phone
       ]);
 
-      console.log(`🟢 Lead movido para atendimento: ${phone}`);
+      console.log(`🟢 Lead movido para atendendo: ${phone}`);
 
       return res.status(200).json({
         moved: true
@@ -109,10 +78,11 @@ if (
     }
 
     /*
-      =====================================================
-      PROCURA LEAD EXISTENTE
-      =====================================================
+    =====================================================
+    PROCURA LEAD EXISTENTE
+    =====================================================
     */
+
     const existingLead = await db.query(`
       SELECT id
       FROM leads
@@ -125,10 +95,11 @@ if (
     ]);
 
     /*
-      =====================================================
-      NOVO LEAD
-      =====================================================
+    =====================================================
+    NOVO LEAD
+    =====================================================
     */
+
     if (existingLead.rows.length === 0) {
 
       await db.query(`
@@ -161,15 +132,12 @@ if (
         message
       ]);
 
-      console.log(`✅ Novo lead criado automaticamente: ${name} | ${phone}`);
+      console.log(
+        `✅ Novo lead criado automaticamente: ${name} | ${phone}`
+      );
 
     } else {
 
-      /*
-        ==========================================
-        LEAD JÁ EXISTE
-        ==========================================
-      */
       await db.query(`
         UPDATE leads
         SET
@@ -182,7 +150,9 @@ if (
         phone
       ]);
 
-      console.log(`🔄 Lead atualizado automaticamente: ${phone}`);
+      console.log(
+        `🔄 Lead atualizado automaticamente: ${phone}`
+      );
     }
 
     return res.status(200).json({
@@ -191,7 +161,10 @@ if (
 
   } catch (error) {
 
-    console.error('Erro webhook Evolution:', error);
+    console.error(
+      'Erro webhook Evolution:',
+      error
+    );
 
     return res.status(500).json({
       success: false,
