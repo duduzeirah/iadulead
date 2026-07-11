@@ -32,7 +32,7 @@ router.post('/webhook', async (req, res) => {
       });
     }
 
-    // padroniza todos os números
+    // padroniza todos os números para começar com 55
     if (!phone.startsWith('55')) {
       phone = `55${phone}`;
     }
@@ -51,6 +51,7 @@ router.post('/webhook', async (req, res) => {
     /*
     =====================================================
     MENSAGEM ENVIADA PELA EQUIPE
+    move para AGUARDANDO
     =====================================================
     */
 
@@ -59,18 +60,19 @@ router.post('/webhook', async (req, res) => {
       await db.query(`
         UPDATE leads
         SET
-          status = 'atendendo',
+          status = 'aguardando',
           last_contact_at = NOW(),
           updated_at = NOW()
         WHERE tenant_id = $1
         AND phone = $2
-        AND status = 'novo'
       `, [
         DEFAULT_TENANT_ID,
         phone
       ]);
 
-      console.log(`🟢 Lead movido para atendendo: ${phone}`);
+      console.log(
+        `🟡 Lead movido para aguardando: ${phone}`
+      );
 
       return res.status(200).json({
         moved: true
@@ -84,7 +86,7 @@ router.post('/webhook', async (req, res) => {
     */
 
     const existingLead = await db.query(`
-      SELECT id
+      SELECT id, status
       FROM leads
       WHERE tenant_id = $1
       AND phone = $2
@@ -138,9 +140,25 @@ router.post('/webhook', async (req, res) => {
 
     } else {
 
+      /*
+      =====================================================
+      CLIENTE RESPONDEU NOVAMENTE
+      =====================================================
+      */
+
       await db.query(`
         UPDATE leads
         SET
+          status = CASE
+            WHEN status IN (
+              'novo',
+              'aguardando',
+              'inativo',
+              'sumido'
+            )
+            THEN 'atendendo'
+            ELSE status
+          END,
           last_contact_at = NOW(),
           updated_at = NOW()
         WHERE tenant_id = $1
