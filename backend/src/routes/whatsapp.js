@@ -32,7 +32,7 @@ router.post('/webhook', async (req, res) => {
       });
     }
 
-    // padroniza todos os números para começar com 55
+    // padroniza todos os números
     if (!phone.startsWith('55')) {
       phone = `55${phone}`;
     }
@@ -49,40 +49,9 @@ router.post('/webhook', async (req, res) => {
       '';
 
     /*
-    =====================================================
-    MENSAGEM ENVIADA PELA EQUIPE
-    move para AGUARDANDO
-    =====================================================
-    */
-
-    if (data.key?.fromMe === true) {
-
-      await db.query(`
-        UPDATE leads
-        SET
-          status = 'aguardando',
-          last_contact_at = NOW(),
-          updated_at = NOW()
-        WHERE tenant_id = $1
-        AND phone = $2
-      `, [
-        DEFAULT_TENANT_ID,
-        phone
-      ]);
-
-      console.log(
-        `🟡 Lead movido para aguardando: ${phone}`
-      );
-
-      return res.status(200).json({
-        moved: true
-      });
-    }
-
-    /*
-    =====================================================
+    ============================================
     PROCURA LEAD EXISTENTE
-    =====================================================
+    ============================================
     */
 
     const existingLead = await db.query(`
@@ -96,15 +65,78 @@ router.post('/webhook', async (req, res) => {
       phone
     ]);
 
+    let leadId = null;
+
     /*
-    =====================================================
+    ============================================
+    MENSAGEM ENVIADA PELA EQUIPE
+    move para AGUARDANDO
+    ============================================
+    */
+
+    if (data.key?.fromMe === true) {
+
+      if (existingLead.rows.length > 0) {
+
+        leadId = existingLead.rows[0].id;
+
+        await db.query(`
+          UPDATE leads
+          SET
+            status = 'aguardando',
+            last_contact_at = NOW(),
+            updated_at = NOW()
+          WHERE tenant_id = $1
+          AND phone = $2
+        `, [
+          DEFAULT_TENANT_ID,
+          phone
+        ]);
+
+        if (message) {
+          await db.query(`
+            INSERT INTO messages (
+              tenant_id,
+              lead_id,
+              direction,
+              message,
+              message_type,
+              created_at
+            )
+            VALUES (
+              $1,
+              $2,
+              'outbound',
+              $3,
+              'text',
+              NOW()
+            )
+          `, [
+            DEFAULT_TENANT_ID,
+            leadId,
+            message
+          ]);
+        }
+
+        console.log(
+          `🟡 Lead movido para aguardando: ${phone}`
+        );
+      }
+
+      return res.status(200).json({
+        moved: true
+      });
+    }
+
+    /*
+    ============================================
     NOVO LEAD
-    =====================================================
+    ============================================
     */
 
     if (existingLead.rows.length === 0) {
 
-      await db.query(`
+      const newLead = await db.query(`
         INSERT INTO leads (
           tenant_id,
           name,
@@ -127,6 +159,7 @@ router.post('/webhook', async (req, res) => {
           NOW(),
           NOW()
         )
+        RETURNING id
       `, [
         DEFAULT_TENANT_ID,
         name,
@@ -134,16 +167,20 @@ router.post('/webhook', async (req, res) => {
         message
       ]);
 
+      leadId = newLead.rows[0].id;
+
       console.log(
         `✅ Novo lead criado automaticamente: ${name} | ${phone}`
       );
 
     } else {
 
+      leadId = existingLead.rows[0].id;
+
       /*
-      =====================================================
+      ============================================
       CLIENTE RESPONDEU NOVAMENTE
-      =====================================================
+      ============================================
       */
 
       await db.query(`
@@ -171,6 +208,38 @@ router.post('/webhook', async (req, res) => {
       console.log(
         `🔄 Lead atualizado automaticamente: ${phone}`
       );
+    }
+
+    /*
+    ============================================
+    SALVA MENSAGEM RECEBIDA
+    ============================================
+    */
+
+    if (leadId && message) {
+
+      await db.query(`
+        INSERT INTO messages (
+          tenant_id,
+          lead_id,
+          direction,
+          message,
+          message_type,
+          created_at
+        )
+        VALUES (
+          $1,
+          $2,
+          'inbound',
+          $3,
+          'text',
+          NOW()
+        )
+      `, [
+        DEFAULT_TENANT_ID,
+        leadId,
+        message
+      ]);
     }
 
     return res.status(200).json({
