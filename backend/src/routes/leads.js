@@ -11,8 +11,7 @@ router.use(auth);
 router.get('/', async (req, res) => {
   try {
     const tid = req.user.tenant_id;
-    const { status, search, origin, tag, page = 1, limit = 100, sort = 'created_at_desc' } = req.query;
-
+    const { status, search, origin, tag, page = 1, limit = 100, sort = 'last_contact' } = req.query;
     const conditions = ['l.tenant_id = $1'];
     const params = [tid];
     let p = 2;
@@ -26,14 +25,21 @@ router.get('/', async (req, res) => {
     }
 
     const where = 'WHERE ' + conditions.join(' AND ');
-    const orderMap = {
-      created_at_desc: 'l.created_at DESC',
-      created_at_asc:  'l.created_at ASC',
-      name_asc:        'l.name ASC',
-      value_desc:      'l.estimated_value DESC',
-      last_contact:    'l.last_contact_at DESC',
-    };
-    const order = orderMap[sort] || 'l.created_at DESC';
+   const orderMap = {
+  created_at_desc: 'l.created_at DESC',
+  created_at_asc: 'l.created_at ASC',
+  name_asc: 'l.name ASC',
+  value_desc: 'l.estimated_value DESC',
+
+  // padrão operacional do WhatsApp
+  last_contact: `
+    l.last_contact_at DESC NULLS LAST
+  `,
+};
+
+const order =
+  orderMap[sort] ||
+  orderMap.last_contact;
     const offset = (parseInt(page) - 1) * parseInt(limit);
 
     const countRes = await query(
