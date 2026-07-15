@@ -7,6 +7,20 @@ const router = express.Router();
 
 router.use(auth);
 
+function normalizeBaseUrl(value) {
+  let url = String(value || '').trim();
+
+  if (!url) {
+    url = 'https://evolution-api-production-0819.up.railway.app';
+  }
+
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url}`;
+  }
+
+  return url.replace(/\/+$/, '');
+}
+
 router.post('/', async (req, res) => {
   try {
     const tenantId = req.user.tenant_id;
@@ -42,18 +56,25 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const evolutionUrl = String(process.env.EVOLUTION_URL || '').replace(/\/$/, '');
-    const evolutionInstance = process.env.EVOLUTION_INSTANCE;
-    const evolutionApiKey = process.env.EVOLUTION_API_KEY;
+    const evolutionUrl = normalizeBaseUrl(process.env.EVOLUTION_URL);
+    const evolutionInstance = String(
+      process.env.EVOLUTION_INSTANCE || 'iadulead'
+    ).trim();
+    const evolutionApiKey = String(
+      process.env.EVOLUTION_API_KEY || ''
+    ).trim();
 
-    if (!evolutionUrl || !evolutionInstance || !evolutionApiKey) {
+    if (!evolutionApiKey) {
       return res.status(500).json({
-        error: 'Variáveis da Evolution não configuradas'
+        error: 'EVOLUTION_API_KEY não configurada no serviço iadulead'
       });
     }
 
+    const endpoint =
+      `${evolutionUrl}/message/sendText/${encodeURIComponent(evolutionInstance)}`;
+
     await axios.post(
-      `${evolutionUrl}/message/sendText/${evolutionInstance}`,
+      endpoint,
       {
         number: phone,
         text: String(message).trim()
@@ -67,8 +88,6 @@ router.post('/', async (req, res) => {
       }
     );
 
-    // O webhook da Evolution grava a mensagem no histórico.
-    // Não inserimos aqui para evitar mensagem duplicada.
     await db.query(
       `UPDATE leads
        SET
@@ -87,13 +106,20 @@ router.post('/', async (req, res) => {
     const evolutionError =
       error.response?.data?.message ||
       error.response?.data?.error ||
+      error.response?.data ||
       error.message;
 
-    console.error('Erro ao enviar mensagem:', error.response?.data || error);
+    console.error(
+      'Erro ao enviar mensagem:',
+      error.response?.data || error
+    );
 
     return res.status(500).json({
       success: false,
-      error: evolutionError || 'Erro ao enviar mensagem'
+      error:
+        typeof evolutionError === 'string'
+          ? evolutionError
+          : JSON.stringify(evolutionError)
     });
   }
 });
