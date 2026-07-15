@@ -1,53 +1,53 @@
 const express = require('express');
 const db = require('../db');
+const { auth } = require('../middleware/auth');
 
 const router = express.Router();
 
-const DEFAULT_TENANT_ID =
-  '31bc576d-0b27-4ea9-8a81-769429dde7ed';
-
-/*
-=====================================================
-LISTAR MENSAGENS DE UM LEAD
-=====================================================
-*/
+router.use(auth);
 
 router.get('/:leadId', async (req, res) => {
-
   try {
-
     const { leadId } = req.params;
+    const tenantId = req.user.tenant_id;
 
-    const messages = await db.query(`
-      SELECT
-        id,
-        direction,
-        message,
-        message_type,
-        created_at
-      FROM messages
-      WHERE tenant_id = $1
-      AND lead_id = $2
-      ORDER BY created_at ASC
-    `, [
-      DEFAULT_TENANT_ID,
-      leadId
-    ]);
-
-    return res.json(
-      messages.rows
+    const leadResult = await db.query(
+      `SELECT id
+       FROM leads
+       WHERE id = $1
+       AND tenant_id = $2
+       LIMIT 1`,
+      [leadId, tenantId]
     );
 
-  } catch (error) {
+    if (leadResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Lead não encontrado'
+      });
+    }
 
-    console.error(error);
+    const result = await db.query(
+      `SELECT
+         id,
+         direction,
+         message,
+         message_type,
+         created_at
+       FROM messages
+       WHERE lead_id = $1
+       AND tenant_id = $2
+       ORDER BY created_at ASC`,
+      [leadId, tenantId]
+    );
+
+    return res.json(result.rows);
+  } catch (error) {
+    console.error('Erro ao buscar mensagens:', error);
 
     return res.status(500).json({
-      error: error.message
+      error: 'Erro ao buscar mensagens'
     });
-
   }
-
 });
 
 module.exports = router;
