@@ -9,29 +9,25 @@ router.use(auth);
 
 /*
 =====================================================
-NORMALIZA A URL DA EVOLUTION
+CONFIGURAÇÃO DA EVOLUTION
 =====================================================
 */
-function normalizeBaseUrl(value) {
-  let url = String(value || '').trim();
 
-  if (!url) {
-    url = 'https://evolution-api-production-0819.up.railway.app';
-  }
+const EVOLUTION_URL =
+  'https://evolution-api-production-0819.up.railway.app';
 
-  if (!/^https?:\/\//i.test(url)) {
-    url = `https://${url}`;
-  }
+const EVOLUTION_INSTANCE =
+  process.env.EVOLUTION_INSTANCE || 'iadulead';
 
-  return url.replace(/\/+$/, '');
-}
+const EVOLUTION_API_KEY =
+  process.env.EVOLUTION_API_KEY;
 
 /*
 =====================================================
 POST /api/sendmessage
-ENVIA MENSAGEM PELO CRM
 =====================================================
 */
+
 router.post('/', async (req, res) => {
   try {
     const tenantId = req.user.tenant_id;
@@ -39,9 +35,10 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    VALIDA OS DADOS RECEBIDOS
+    VALIDAÇÃO
     =====================================================
     */
+
     if (!lead_id) {
       return res.status(400).json({
         success: false,
@@ -60,15 +57,16 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    PROCURA O LEAD NO TENANT CORRETO
+    BUSCA O LEAD
     =====================================================
     */
+
     const leadResult = await db.query(
       `
       SELECT
         id,
-        phone,
-        name
+        name,
+        phone
       FROM leads
       WHERE id = $1
       AND tenant_id = $2
@@ -91,9 +89,10 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    PADRONIZA O TELEFONE
+    NORMALIZA O TELEFONE
     =====================================================
     */
+
     let phone = String(lead.phone || '')
       .replace(/\D/g, '');
 
@@ -110,22 +109,11 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    VARIÁVEIS DA EVOLUTION
+    CONFERE A CHAVE
     =====================================================
     */
-    const evolutionUrl = normalizeBaseUrl(
-      process.env.EVOLUTION_URL
-    );
 
-    const evolutionInstance = String(
-      process.env.EVOLUTION_INSTANCE || 'iadulead'
-    ).trim();
-
-    const evolutionApiKey = String(
-      process.env.EVOLUTION_API_KEY || ''
-    ).trim();
-
-    if (!evolutionApiKey) {
+    if (!EVOLUTION_API_KEY) {
       return res.status(500).json({
         success: false,
         error:
@@ -133,67 +121,49 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (!evolutionInstance) {
-      return res.status(500).json({
-        success: false,
-        error:
-          'EVOLUTION_INSTANCE não configurada no serviço iadulead'
-      });
-    }
-
     /*
     =====================================================
-    ENDPOINT DA EVOLUTION
+    MONTA O ENDPOINT
     =====================================================
     */
+
     const endpoint =
-      `${evolutionUrl}/message/sendText/` +
-      encodeURIComponent(evolutionInstance);
+      `${EVOLUTION_URL}/message/sendText/` +
+      encodeURIComponent(EVOLUTION_INSTANCE);
 
-    console.log(
-      `📤 Enviando mensagem para ${phone} pela instância ${evolutionInstance}`
-    );
+    console.log('📤 Endpoint Evolution:', endpoint);
+    console.log('📱 Telefone:', phone);
+    console.log('🔌 Instância:', EVOLUTION_INSTANCE);
 
     /*
     =====================================================
-    ENVIA PARA A EVOLUTION
-
-    Formato esperado:
-    {
-      number,
-      textMessage: {
-        text
-      }
-    }
+    ENVIA A MENSAGEM
     =====================================================
     */
-    const evolutionResponse = await axios.post(
-      endpoint,
-      {
-        number: phone,
 
-        textMessage: {
-          text: cleanMessage
-        }
+    const evolutionResponse = await axios({
+      method: 'post',
+      url: endpoint,
+
+      headers: {
+        apikey: EVOLUTION_API_KEY,
+        'Content-Type': 'application/json'
       },
-      {
-        headers: {
-          apikey: evolutionApiKey,
-          'Content-Type': 'application/json'
-        },
 
-        timeout: 20000,
+      data: {
+        number: phone,
+        text: cleanMessage
+      },
 
-        validateStatus: status =>
-          status >= 200 && status < 300
-      }
-    );
+      timeout: 20000
+    });
 
     /*
     =====================================================
-    ATUALIZA O LEAD PARA AGUARDANDO
+    ATUALIZA O LEAD
     =====================================================
     */
+
     await db.query(
       `
       UPDATE leads
@@ -225,22 +195,22 @@ router.post('/', async (req, res) => {
     const status =
       error.response?.status || 500;
 
-    const evolutionData =
-      error.response?.data;
+    const details =
+      error.response?.data || null;
 
-    const evolutionError =
-      evolutionData?.response?.message?.[0] ||
-      evolutionData?.message ||
-      evolutionData?.error ||
+    const errorMessage =
+      details?.response?.message?.[0] ||
+      details?.message ||
+      details?.error ||
       error.message ||
       'Erro ao enviar mensagem';
 
     console.error(
-      '❌ Erro ao enviar mensagem pela Evolution:',
+      '❌ Erro no envio:',
       {
+        message: error.message,
         status,
-        data: evolutionData,
-        message: error.message
+        details
       }
     );
 
@@ -250,13 +220,13 @@ router.post('/', async (req, res) => {
         : 500
     ).json({
       success: false,
-      error:
-        typeof evolutionError === 'string'
-          ? evolutionError
-          : JSON.stringify(evolutionError),
 
-      details:
-        evolutionData || null
+      error:
+        typeof errorMessage === 'string'
+          ? errorMessage
+          : JSON.stringify(errorMessage),
+
+      details
     });
   }
 });
