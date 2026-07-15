@@ -25,6 +25,7 @@ const EVOLUTION_API_KEY =
 /*
 =====================================================
 POST /api/sendmessage
+ENVIA E SALVA A MENSAGEM NO CRM
 =====================================================
 */
 
@@ -32,12 +33,6 @@ router.post('/', async (req, res) => {
   try {
     const tenantId = req.user.tenant_id;
     const { lead_id, message } = req.body;
-
-    /*
-    =====================================================
-    VALIDAÇÃO
-    =====================================================
-    */
 
     if (!lead_id) {
       return res.status(400).json({
@@ -89,7 +84,7 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    NORMALIZA O TELEFONE
+    PADRONIZA O TELEFONE
     =====================================================
     */
 
@@ -109,7 +104,7 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    CONFERE A CHAVE
+    CONFERE CONFIGURAÇÃO DA EVOLUTION
     =====================================================
     */
 
@@ -121,23 +116,13 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /*
-    =====================================================
-    MONTA O ENDPOINT
-    =====================================================
-    */
-
     const endpoint =
       `${EVOLUTION_URL}/message/sendText/` +
       encodeURIComponent(EVOLUTION_INSTANCE);
 
-    console.log('📤 Endpoint Evolution:', endpoint);
-    console.log('📱 Telefone:', phone);
-    console.log('🔌 Instância:', EVOLUTION_INSTANCE);
-
     /*
     =====================================================
-    ENVIA A MENSAGEM
+    ENVIA A MENSAGEM PARA O WHATSAPP
     =====================================================
     */
 
@@ -160,7 +145,50 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    ATUALIZA O LEAD
+    SALVA A MENSAGEM ENVIADA NO HISTÓRICO
+
+    O NOT EXISTS evita duplicação caso o webhook
+    também registre a mesma mensagem.
+    =====================================================
+    */
+
+    await db.query(
+      `
+      INSERT INTO messages (
+        tenant_id,
+        lead_id,
+        direction,
+        message,
+        message_type,
+        created_at
+      )
+      SELECT
+        $1,
+        $2,
+        'outbound',
+        $3,
+        'text',
+        NOW()
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM messages
+        WHERE tenant_id = $1
+        AND lead_id = $2
+        AND direction = 'outbound'
+        AND message = $3
+        AND created_at >= NOW() - INTERVAL '15 seconds'
+      )
+      `,
+      [
+        tenantId,
+        lead_id,
+        cleanMessage
+      ]
+    );
+
+    /*
+    =====================================================
+    MOVE O LEAD PARA AGUARDANDO
     =====================================================
     */
 
@@ -181,13 +209,14 @@ router.post('/', async (req, res) => {
     );
 
     console.log(
-      `✅ Mensagem enviada para ${lead.name || phone}`
+      `✅ Mensagem enviada e salva: ${lead.name || phone}`
     );
 
     return res.status(200).json({
       success: true,
       lead_id,
       phone,
+      message: cleanMessage,
       evolution: evolutionResponse.data
     });
 
