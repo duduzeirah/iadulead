@@ -335,6 +335,19 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 /* CONFIG */
 .cfg-section{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:18px;margin-bottom:14px}
 .cfg-title{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+
+.pipeline-config-list{display:flex;flex-direction:column;gap:10px}
+.pipeline-config-row{display:grid;grid-template-columns:42px minmax(150px,1fr) minmax(180px,1.4fr) 86px 70px;gap:8px;align-items:end;padding:11px;background:var(--bg3);border:1px solid var(--b1);border-radius:var(--r-sm)}
+.pipeline-config-row .form-group{margin:0}
+.pipeline-config-row input[type="color"]{height:38px;padding:3px;cursor:pointer}
+.pipeline-config-code{font-size:10px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-top:5px;text-align:center}
+.pipeline-config-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+@media(max-width:760px){
+  .pipeline-config-row{grid-template-columns:44px 1fr 72px}
+  .pipeline-config-row .pc-desc{grid-column:1/-1}
+  .pipeline-config-row .pc-name{grid-column:2/3}
+}
+
 .qr-box{width:130px;height:130px;border:2px dashed var(--b2);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;background:var(--bg3);font-size:11px;color:var(--t3)}
 
 /* OVERLAY (mobile) */
@@ -453,14 +466,14 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
       <button class="sb-item" data-page="pipeline" onclick="go('pipeline',this)"><span class="sb-icon">🔄</span>Pipeline Kanban<span class="sb-badge" id="b-pipeline">0</span></button>
 
       <div class="sb-section" style="margin-top:6px">Por Etapa</div>
-      <button class="sb-item" data-page="novos" onclick="go('novos',this)"><span class="sb-icon">🟢</span>Novos Leads<span class="sb-badge" id="b-novos">0</span></button>
-      <button class="sb-item" data-page="atendendo" onclick="go('atendendo',this)"><span class="sb-icon">🟡</span>Em Atendimento<span class="sb-badge yellow" id="b-atendendo">0</span></button>
-      <button class="sb-item" data-page="aguardando" onclick="go('aguardando',this)"><span class="sb-icon">🔵</span>Aguardando<span class="sb-badge blue" id="b-aguardando">0</span></button>
-      <button class="sb-item" data-page="fechados" onclick="go('fechados',this)"><span class="sb-icon">🟣</span>Fechados<span class="sb-badge purple" id="b-fechados">0</span></button>
-      <button class="sb-item" data-page="compraram" onclick="go('compraram',this)"><span class="sb-icon">💰</span>Compraram<span class="sb-badge" id="b-compraram">0</span></button>
-      <button class="sb-item" data-page="assinantes" onclick="go('assinantes',this)"><span class="sb-icon">⭐</span>Assinantes<span class="sb-badge" id="b-assinantes">0</span></button>
-      <button class="sb-item" data-page="inativos" onclick="go('inativos',this)"><span class="sb-icon">🔴</span>Inativos<span class="sb-badge red" id="b-inativos">0</span></button>
-      <button class="sb-item" data-page="sumidos" onclick="go('sumidos',this)"><span class="sb-icon">👻</span>Sumidos<span class="sb-badge red" id="b-sumidos">0</span></button>
+      <button class="sb-item" data-page="novos" onclick="go('novos',this)"><span class="sb-icon">🟢</span><span id="sb-label-novo">Novos Leads</span><span class="sb-badge" id="b-novos">0</span></button>
+      <button class="sb-item" data-page="atendendo" onclick="go('atendendo',this)"><span class="sb-icon">🟡</span><span id="sb-label-atendendo">Em Atendimento</span><span class="sb-badge yellow" id="b-atendendo">0</span></button>
+      <button class="sb-item" data-page="aguardando" onclick="go('aguardando',this)"><span class="sb-icon">🔵</span><span id="sb-label-aguardando">Aguardando</span><span class="sb-badge blue" id="b-aguardando">0</span></button>
+      <button class="sb-item" data-page="fechados" onclick="go('fechados',this)"><span class="sb-icon">🟣</span><span id="sb-label-fechado">Fechados</span><span class="sb-badge purple" id="b-fechados">0</span></button>
+      <button class="sb-item" data-page="compraram" onclick="go('compraram',this)"><span class="sb-icon">💰</span><span id="sb-label-comprou">Compraram</span><span class="sb-badge" id="b-compraram">0</span></button>
+      <button class="sb-item" data-page="assinantes" onclick="go('assinantes',this)"><span class="sb-icon">⭐</span><span id="sb-label-assinante">Assinantes</span><span class="sb-badge" id="b-assinantes">0</span></button>
+      <button class="sb-item" data-page="inativos" onclick="go('inativos',this)"><span class="sb-icon">🔴</span><span id="sb-label-inativo">Inativos</span><span class="sb-badge red" id="b-inativos">0</span></button>
+      <button class="sb-item" data-page="sumidos" onclick="go('sumidos',this)"><span class="sb-icon">👻</span><span id="sb-label-sumido">Sumidos</span><span class="sb-badge red" id="b-sumidos">0</span></button>
       <button class="sb-item" data-page="todos" onclick="go('todos',this)"><span class="sb-icon">👥</span>Todos os Leads</button>
 
       <div class="sb-section" style="margin-top:6px">Ferramentas</div>
@@ -596,6 +609,16 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
           <div class="toggle-row"><div class="toggle-label"><h4>Mensagem de boas-vindas</h4><p>Enviar template ao novo contato</p></div><label class="switch"><input type="checkbox" checked><span class="switch-slider"></span></label></div>
         </div>
         <div class="cfg-section">
+          <div class="cfg-title">🔄 Configurar Pipeline</div>
+          <div class="alert brand"><div class="alert-icon">ℹ️</div><div>Você pode mudar o nome, a descrição, a cor e a ordem das etapas. Os códigos internos continuam iguais para não quebrar automações, filtros ou relatórios.</div></div>
+          <div id="pipeline-config-list" class="pipeline-config-list"></div>
+          <div class="pipeline-config-actions">
+            <button class="btn btn-brand" onclick="savePipelineSettings()">Salvar Pipeline</button>
+            <button class="btn btn-outline" onclick="resetPipelineSettings()">Restaurar padrão</button>
+          </div>
+        </div>
+
+        <div class="cfg-section">
           <div class="cfg-title">👤 Meu Perfil</div>
           <div class="form-group"><label>Nome</label><input type="text" id="cfg-nome"></div>
           <div class="form-group"><label>E-mail</label><input type="email" id="cfg-email" disabled style="opacity:.6"></div>
@@ -726,6 +749,19 @@ let activeChatLeadId = null;
 let chatRefreshTimer = null;
 let automaticRefreshTimer = null;
 
+const PIPELINE_DEFAULTS={
+  novo:{label:'Novos Leads',description:'Contato recém-chegado',color:'#00C566',order:1},
+  atendendo:{label:'Em Atendimento',description:'Conversa ativa com o cliente',color:'#F5A623',order:2},
+  aguardando:{label:'Aguardando',description:'Aguardando resposta ou confirmação',color:'#4A90E2',order:3},
+  fechado:{label:'Horário marcado',description:'Cliente confirmou dia e horário',color:'#9B6DFF',order:4},
+  comprou:{label:'Serviço realizado',description:'Cliente concluiu o serviço',color:'#3BE88E',order:5},
+  assinante:{label:'Cliente recorrente',description:'Cliente ativo ou recorrente',color:'#00D4FF',order:6},
+  inativo:{label:'Atendimento encerrado',description:'Contato sem oportunidade ativa',color:'#F04D5B',order:7},
+  sumido:{label:'Não respondeu',description:'Cliente parou de responder',color:'#FF6B9D',order:8}
+};
+let pipelineSettings={};
+
+
 // ============================================================
 //  UTILS
 // ============================================================
@@ -825,6 +861,7 @@ function showApp() {
   $('app').classList.add('visible');
   $('app').style.display='flex';
   populateUser();
+  loadPipelineSettings();
   loadAll();
 }
 function populateUser() {
@@ -844,6 +881,91 @@ function populateUser() {
       $('sb-trial-days').textContent=d;
     }
   }
+}
+
+
+function pipelineStorageKey(){
+  const account=(me?.tenant_id||me?.empresa||me?.email||'default').toString().toLowerCase();
+  return 'iadulead_pipeline_'+account;
+}
+function loadPipelineSettings(){
+  let saved={};
+  try{saved=JSON.parse(localStorage.getItem(pipelineStorageKey())||'{}')}catch(e){}
+  pipelineSettings={};
+  Object.entries(PIPELINE_DEFAULTS).forEach(([key,def])=>{
+    pipelineSettings[key]={...def,...(saved[key]||{})};
+  });
+  applyPipelineLabels();
+}
+function statusCfg(status){return pipelineSettings[status]||PIPELINE_DEFAULTS[status]||{label:status,description:'',color:'#8E9DB8',order:99}}
+function statusLabel(status){return statusCfg(status).label||status}
+function statusDescription(status){return statusCfg(status).description||''}
+function orderedStatuses(){
+  return Object.keys(PIPELINE_DEFAULTS).sort((a,b)=>Number(statusCfg(a).order)-Number(statusCfg(b).order));
+}
+
+function refreshStatusSelects(){
+  const sel=$('ml-st');
+  if(!sel) return;
+  const current=sel.value||'novo';
+  const icons={novo:'🟢',atendendo:'🟡',aguardando:'🔵',fechado:'🟣',comprou:'💰',assinante:'⭐',inativo:'🔴',sumido:'👻'};
+  sel.innerHTML=orderedStatuses().map(s=>`<option value="${s}">${icons[s]||'•'} ${esc(statusLabel(s))}</option>`).join('');
+  sel.value=current;
+}
+function applyPipelineLabels(){
+  const pageMap={novo:'novos',atendendo:'atendendo',aguardando:'aguardando',fechado:'fechados',comprou:'compraram',assinante:'assinantes',inativo:'inativos',sumido:'sumidos'};
+  refreshStatusSelects();
+  Object.keys(PIPELINE_DEFAULTS).forEach(status=>{
+    const el=$('sb-label-'+status);
+    if(el) el.textContent=statusLabel(status);
+    const btn=qp(pageMap[status]);
+    if(btn) btn.title=statusDescription(status);
+  });
+}
+function renderPipelineConfig(){
+  const wrap=$('pipeline-config-list');
+  if(!wrap) return;
+  wrap.innerHTML=orderedStatuses().map(status=>{
+    const c=statusCfg(status);
+    return `<div class="pipeline-config-row">
+      <div>
+        <input type="color" id="pc-color-${status}" value="${esc(c.color)}" title="Cor da etapa">
+        <div class="pipeline-config-code">${status}</div>
+      </div>
+      <div class="form-group pc-name"><label>Nome exibido</label><input id="pc-name-${status}" value="${esc(c.label)}" maxlength="35"></div>
+      <div class="form-group pc-desc"><label>Descrição</label><input id="pc-desc-${status}" value="${esc(c.description)}" maxlength="100"></div>
+      <div class="form-group"><label>Ordem</label><input type="number" id="pc-order-${status}" value="${Number(c.order)||1}" min="1" max="99"></div>
+    </div>`;
+  }).join('');
+}
+function savePipelineSettings(){
+  const next={};
+  Object.keys(PIPELINE_DEFAULTS).forEach(status=>{
+    next[status]={
+      label:$('pc-name-'+status)?.value.trim()||PIPELINE_DEFAULTS[status].label,
+      description:$('pc-desc-'+status)?.value.trim()||PIPELINE_DEFAULTS[status].description,
+      color:$('pc-color-'+status)?.value||PIPELINE_DEFAULTS[status].color,
+      order:Number($('pc-order-'+status)?.value)||PIPELINE_DEFAULTS[status].order
+    };
+  });
+  pipelineSettings=next;
+  localStorage.setItem(pipelineStorageKey(),JSON.stringify(next));
+  applyPipelineLabels();
+  renderPipelineConfig();
+  updateBadges();
+  const page=q('.sb-item.active')?.dataset?.page||'dashboard';
+  renderPage(page);
+  toast('Pipeline personalizado e salvo!','ok');
+}
+function resetPipelineSettings(){
+  confirm$('↩️','Restaurar pipeline','Voltar aos nomes e cores padrão?',()=>{
+    localStorage.removeItem(pipelineStorageKey());
+    loadPipelineSettings();
+    renderPipelineConfig();
+    const page=q('.sb-item.active')?.dataset?.page||'dashboard';
+    renderPage(page);
+    toast('Pipeline restaurado','ok');
+  });
 }
 
 // ============================================================
@@ -885,14 +1007,15 @@ async function loadDash() {
 // ============================================================
 //  NAV
 // ============================================================
-const PT={dashboard:'Dashboard',pipeline:'Pipeline Kanban',novos:'Novos Leads',atendendo:'Em Atendimento',aguardando:'Aguardando Resposta',fechados:'Fechados',compraram:'Compraram',assinantes:'Assinantes',inativos:'Inativos',sumidos:'Sumidos / Fantasmas',todos:'Todos os Leads',remarketing:'Remarketing',lembretes:'Lembretes',templates:'Mensagens Prontas',config:'Configurações'};
+const PT={dashboard:'Dashboard',pipeline:'Pipeline Kanban',todos:'Todos os Leads',remarketing:'Remarketing',lembretes:'Lembretes',templates:'Mensagens Prontas',config:'Configurações'};
+const PAGE_STATUS={novos:'novo',atendendo:'atendendo',aguardando:'aguardando',fechados:'fechado',compraram:'comprou',assinantes:'assinante',inativos:'inativo',sumidos:'sumido'};
 
 function go(page,el) {
   qs('.page').forEach(p=>p.classList.remove('active'));
   qs('.sb-item').forEach(i=>i.classList.remove('active'));
   const pg=$('pg-'+page); if(pg) pg.classList.add('active');
   if(el) el.classList.add('active');
-  $('page-title').textContent=PT[page]||page;
+  $('page-title').textContent=PAGE_STATUS[page]?statusLabel(PAGE_STATUS[page]):(PT[page]||page);
   closeSb(); renderPage(page);
 }
 function toggleSb(){$('sidebar').classList.toggle('open');$('sb-overlay').classList.toggle('show')}
@@ -909,6 +1032,7 @@ function renderPage(page) {
   else if(page==='remarketing') renderRemarketing();
   else if(page==='lembretes') renderLembretes();
   else if(page==='templates') renderTemplates();
+  else if(page==='config') renderPipelineConfig();
   else if(sm[page]) renderStatusPage(page,sm[page]);
 }
 
@@ -940,8 +1064,8 @@ function renderDash() {
     {l:'Em Atendimento',v:c('atendendo'),s:'agora',cls:'sc-warn'},
     {l:'Aguardando',v:c('aguardando'),s:'sem resposta',cls:'sc-info'},
     {l:'Inativos / Sumidos',v:lost,s:'precisam contato',cls:'sc-danger'},
-    {l:'Fechados',v:c('fechado'),s:'propostas aceitas',cls:'sc-purple'},
-    {l:'Compraram',v:c('comprou'),s:'clientes ativos',cls:'sc-cyan'},
+    {l:statusLabel('fechado'),v:c('fechado'),s:statusDescription('fechado'),cls:'sc-purple'},
+    {l:statusLabel('comprou'),v:c('comprou'),s:statusDescription('comprou'),cls:'sc-cyan'},
   ].map(s=>`<div class="stat-card ${s.cls}"><div class="stat-label">${s.l}</div><div class="stat-val">${s.v}</div><div class="stat-sub">${s.s}</div></div>`).join('');
 
   let alerts='';
@@ -950,7 +1074,7 @@ function renderDash() {
   if(leads.length===0) alerts=`<div class="alert brand"><div class="alert-icon">👋</div><div><strong>Bem-vindo ao Iadu Lead!</strong> Cadastre seu primeiro lead para começar.</div></div>`;
   $('dash-alerts').innerHTML=alerts;
 
-  const stages=[{s:'novo',l:'Novos',c:'var(--brand)'},{s:'atendendo',l:'Atendendo',c:'var(--warn)'},{s:'aguardando',l:'Aguardando',c:'var(--info)'},{s:'fechado',l:'Fechados',c:'var(--purple)'},{s:'comprou',l:'Compraram',c:'var(--cyan)'},{s:'assinante',l:'Assinantes',c:'#3be88e'}];
+  const stages=['novo','atendendo','aguardando','fechado','comprou','assinante'].map(s=>({s,l:statusLabel(s),c:statusCfg(s).color}));
   $('dash-funnel').innerHTML=stages.map(s=>`<div class="funnel-step" onclick="go('${s.s==='comprou'?'compraram':s.s==='assinante'?'assinantes':s.s+'s'}',qp('${s.s==='comprou'?'compraram':s.s==='assinante'?'assinantes':s.s+'s'}'))"><div class="funnel-num" style="color:${s.c}">${c(s.s)}</div><div class="funnel-lbl">${s.l}</div></div>`).join('');
 
   const acts=(dashData.activities||[]).slice(0,8);
@@ -963,7 +1087,7 @@ function renderDash() {
 //  KANBAN
 // ============================================================
 function renderKanban() {
-  const cols=[{k:'novo',l:'Novos Leads',c:'#00C566'},{k:'atendendo',l:'Em Atendimento',c:'#F5A623'},{k:'aguardando',l:'Aguardando',c:'#4A90E2'},{k:'fechado',l:'Fechados',c:'#9B6DFF'},{k:'comprou',l:'Compraram',c:'#3be88e'},{k:'assinante',l:'Assinantes',c:'#00D4FF'},{k:'inativo',l:'Inativos',c:'#F04D5B'},{k:'sumido',l:'Sumidos',c:'#FF6B9D'}];
+  const cols=orderedStatuses().map(k=>({k,l:statusLabel(k),c:statusCfg(k).color}));
   $('kanban').innerHTML=cols.map(col=>{
     const items=leads.filter(l=>l.status===col.k).sort((a,b)=>new Date(b.last_contact_at||b.created_at)-new Date(a.last_contact_at||a.created_at));
     const cards=items.map(l=>`
@@ -993,7 +1117,7 @@ function renderKanban() {
 function renderStatusPage(page,status) {
   const c=$('pi-'+page); if(!c) return;
   const filtered=leads.filter(l=>l.status===status);
-  const snm={novo:'Novos Leads 🟢',atendendo:'Em Atendimento 🟡',aguardando:'Aguardando 🔵',fechado:'Fechados 🟣',comprou:'Compraram 💰',assinante:'Assinantes ⭐',inativo:'Inativos 🔴',sumido:'Sumidos 👻'};
+  const snm=Object.fromEntries(orderedStatuses().map(s=>[s,statusLabel(s)]));
   let alert='';
   if(status==='sumido') alert=`<div class="alert warn"><div class="alert-icon">⚠️</div><div>Esses leads pararam de responder. Um follow-up pode recuperar muitos! <button class="btn btn-sm btn-brand" style="margin-top:6px" onclick="massFollowup()">Follow-up em Massa</button></div></div>`;
   if(status==='inativo') alert=`<div class="alert danger"><div class="alert-icon">🚨</div><div>Clientes em risco de churn! Envie uma oferta especial. <button class="btn btn-sm btn-danger" style="margin-top:6px" onclick="go('remarketing',qp('remarketing'))">Ir ao Remarketing</button></div></div>`;
@@ -1017,8 +1141,8 @@ function renderTodos(filter) {
   if(filter!==undefined) todosFilter=filter;
   const filtered=todosFilter?leads.filter(l=>l.status===todosFilter):leads;
   $('todos-count').textContent=`${filtered.length} leads ${todosFilter?'filtrados':'cadastrados'}`;
-  const statuses=['novo','atendendo','aguardando','fechado','comprou','assinante','inativo','sumido'];
-  const sn={novo:'Novos',atendendo:'Atendendo',aguardando:'Aguardando',fechado:'Fechados',comprou:'Compraram',assinante:'Assinantes',inativo:'Inativos',sumido:'Sumidos'};
+  const statuses=orderedStatuses();
+  const sn=Object.fromEntries(statuses.map(s=>[s,statusLabel(s)]));
   $('todos-filters').innerHTML=`<button class="fchip ${!todosFilter?'on':''}" onclick="renderTodos(null)">Todos (${leads.length})</button>`+
     statuses.map(s=>`<button class="fchip ${todosFilter===s?'on':''}" onclick="renderTodos('${s}')"><span class="dot" style="background:${avColor(s)}"></span>${sn[s]} (${leads.filter(l=>l.status===s).length})</button>`).join('');
   $('todos-body').innerHTML=filtered.length?filtered.map(l=>`<tr>
@@ -1037,7 +1161,7 @@ function renderTodos(filter) {
   </tr>`).join(''):`<tr><td colspan="8"><div class="empty"><div class="ei">🔍</div><h3>Nenhum lead</h3></div></td></tr>`;
 }
 
-function pillLabel(s){return{novo:'Novo Lead',atendendo:'Atendendo',aguardando:'Aguardando',fechado:'Fechado',comprou:'Comprou',assinante:'Assinante',inativo:'Inativo',sumido:'Sumido'}[s]||s}
+function pillLabel(s){return statusLabel(s)}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 
 // ============================================================
