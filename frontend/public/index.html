@@ -304,6 +304,19 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 .chat-side .ld-hdr{padding-right:28px}
 .chat-loading{margin:auto;display:flex;align-items:center;gap:10px;color:var(--t2);font-size:13px}
 
+.classification-box{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:14px;margin-bottom:18px}
+.classification-title{font-size:12px;font-weight:700;margin-bottom:12px;color:var(--t1);display:flex;align-items:center;gap:7px}
+.classification-field{margin-bottom:11px}
+.classification-field:last-child{margin-bottom:0}
+.classification-field label{display:block;font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px}
+.classification-field select{width:100%;background:var(--bg3);border:1px solid var(--b1);color:var(--t1);border-radius:var(--r-sm);padding:9px 10px;font-size:12px;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s}
+.classification-field select:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-glow)}
+.classification-field select:disabled{opacity:.55;cursor:wait}
+.classification-save{font-size:10px;color:var(--t3);margin-top:8px;min-height:14px}
+.classification-save.ok{color:var(--brand)}
+.classification-save.err{color:var(--danger)}
+
+
 @media(min-width:821px){
   #m-detail .modal-box{height:88vh!important;max-height:88vh!important}
   #detail-content{height:100%!important;min-height:0!important;overflow:hidden!important}
@@ -1320,6 +1333,54 @@ async function openDetail(id){
           <div class="dr"><span>Cadastrado</span><span>${new Date(l.created_at).toLocaleDateString('pt-BR')}</span></div>
         </div>
 
+        <div class="classification-box">
+          <div class="classification-title">🏷 Classificação do atendimento</div>
+
+          <div class="classification-field">
+            <label for="class-topic">Assunto</label>
+            <select id="class-topic" onchange="saveLeadClassification('${l.id}')">
+              <option value="nao_identificado" ${(!l.conversation_topic||l.conversation_topic==='nao_identificado')?'selected':''}>Não identificado</option>
+              <option value="protese" ${l.conversation_topic==='protese'?'selected':''}>Prótese capilar</option>
+              <option value="corte" ${l.conversation_topic==='corte'?'selected':''}>Corte</option>
+              <option value="barba" ${l.conversation_topic==='barba'?'selected':''}>Barba</option>
+              <option value="manutencao" ${l.conversation_topic==='manutencao'?'selected':''}>Manutenção</option>
+              <option value="agendamento" ${l.conversation_topic==='agendamento'?'selected':''}>Agendamento</option>
+              <option value="orcamento" ${l.conversation_topic==='orcamento'?'selected':''}>Orçamento</option>
+              <option value="curso" ${l.conversation_topic==='curso'?'selected':''}>Curso</option>
+              <option value="plano" ${l.conversation_topic==='plano'?'selected':''}>Plano</option>
+              <option value="financeiro" ${l.conversation_topic==='financeiro'?'selected':''}>Financeiro</option>
+              <option value="parceria" ${l.conversation_topic==='parceria'?'selected':''}>Parceria</option>
+              <option value="outro" ${l.conversation_topic==='outro'?'selected':''}>Outro</option>
+            </select>
+          </div>
+
+          <div class="classification-field">
+            <label for="class-priority">Prioridade comercial</label>
+            <select id="class-priority" onchange="saveLeadClassification('${l.id}')">
+              <option value="comum" ${(!l.commercial_priority||l.commercial_priority==='comum')?'selected':''}>⚪ Atendimento comum</option>
+              <option value="acompanhar" ${l.commercial_priority==='acompanhar'?'selected':''}>🔵 Acompanhar</option>
+              <option value="negociacao" ${l.commercial_priority==='negociacao'?'selected':''}>🟡 Em negociação</option>
+              <option value="quente" ${l.commercial_priority==='quente'?'selected':''}>🔥 Quente</option>
+              <option value="urgente" ${l.commercial_priority==='urgente'?'selected':''}>🚨 Urgente</option>
+              <option value="resolvido" ${l.commercial_priority==='resolvido'?'selected':''}>✅ Resolvido</option>
+            </select>
+          </div>
+
+          <div class="classification-field">
+            <label for="class-relationship">Relação com a empresa</label>
+            <select id="class-relationship" onchange="saveLeadClassification('${l.id}')">
+              <option value="nao_identificado" ${(!l.customer_relationship||l.customer_relationship==='nao_identificado')?'selected':''}>Não identificado</option>
+              <option value="primeiro_contato" ${l.customer_relationship==='primeiro_contato'?'selected':''}>Primeiro contato</option>
+              <option value="cliente_conhecido" ${l.customer_relationship==='cliente_conhecido'?'selected':''}>Cliente conhecido</option>
+              <option value="ex_cliente" ${l.customer_relationship==='ex_cliente'?'selected':''}>Ex-cliente</option>
+              <option value="parceiro" ${l.customer_relationship==='parceiro'?'selected':''}>Parceiro</option>
+              <option value="fornecedor" ${l.customer_relationship==='fornecedor'?'selected':''}>Fornecedor</option>
+            </select>
+          </div>
+
+          <div id="classification-save" class="classification-save">Alterações salvam automaticamente.</div>
+        </div>
+
         ${l.notes?`<div class="detail-sec"><h4>Observações</h4><p style="font-size:13px;color:var(--t2);line-height:1.6">${esc(l.notes)}</p></div>`:''}
 
         <div class="detail-sec"><h4>Mover para Etapa</h4>
@@ -1345,6 +1406,87 @@ async function openDetail(id){
     const box=$('chat-messages');
     if(box) box.innerHTML=`<div class="chat-empty">❌ ${esc(e.message||'Erro ao carregar conversa')}</div>`;
     toast(e.message||'Erro ao carregar conversa','err');
+  }
+}
+
+
+async function saveLeadClassification(id){
+  const topic=$('class-topic');
+  const priority=$('class-priority');
+  const relationship=$('class-relationship');
+  const status=$('classification-save');
+
+  if(!topic||!priority||!relationship) return;
+
+  const previous={
+    conversation_topic:leads.find(x=>x.id===id)?.conversation_topic,
+    commercial_priority:leads.find(x=>x.id===id)?.commercial_priority,
+    customer_relationship:leads.find(x=>x.id===id)?.customer_relationship
+  };
+
+  const body={
+    conversation_topic:topic.value,
+    commercial_priority:priority.value,
+    customer_relationship:relationship.value
+  };
+
+  topic.disabled=true;
+  priority.disabled=true;
+  relationship.disabled=true;
+
+  if(status){
+    status.className='classification-save';
+    status.textContent='Salvando...';
+  }
+
+  try{
+    const updated=await api('PATCH',`/leads/${id}`,body);
+    const index=leads.findIndex(x=>x.id===id);
+
+    if(index>=0){
+      leads[index]={
+        ...leads[index],
+        ...updated,
+        ...body
+      };
+    }
+
+    if(status){
+      status.className='classification-save ok';
+      status.textContent='✓ Classificação salva';
+    }
+
+    setTimeout(()=>{
+      const current=$('classification-save');
+      if(current){
+        current.className='classification-save';
+        current.textContent='Alterações salvam automaticamente.';
+      }
+    },1800);
+
+  }catch(e){
+    const lead=leads.find(x=>x.id===id);
+    if(lead){
+      lead.conversation_topic=previous.conversation_topic;
+      lead.commercial_priority=previous.commercial_priority;
+      lead.customer_relationship=previous.customer_relationship;
+    }
+
+    if(previous.conversation_topic!==undefined) topic.value=previous.conversation_topic||'nao_identificado';
+    if(previous.commercial_priority!==undefined) priority.value=previous.commercial_priority||'comum';
+    if(previous.customer_relationship!==undefined) relationship.value=previous.customer_relationship||'nao_identificado';
+
+    if(status){
+      status.className='classification-save err';
+      status.textContent='Não foi possível salvar';
+    }
+
+    toast(e.message||'Erro ao salvar classificação','err');
+
+  }finally{
+    topic.disabled=false;
+    priority.disabled=false;
+    relationship.disabled=false;
   }
 }
 
