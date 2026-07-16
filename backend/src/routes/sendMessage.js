@@ -24,6 +24,161 @@ const EVOLUTION_API_KEY =
 
 /*
 =====================================================
+NORMALIZA TEXTO
+=====================================================
+*/
+
+function normalizeText(text = '') {
+  return String(text)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/*
+=====================================================
+RECONHECE O STATUS PELA MENSAGEM
+=====================================================
+*/
+
+function detectStatusFromMessage(message) {
+  const text = normalizeText(message);
+
+  /*
+  Frases negativas evitam mudar o cliente por engano.
+
+  Exemplos:
+  - ainda não está confirmado
+  - não confirmou
+  - pagamento não confirmado
+  */
+
+  const negativePatterns = [
+    'nao confirmado',
+    'nao esta confirmado',
+    'ainda nao confirmado',
+    'ainda nao esta confirmado',
+    'nao confirmou',
+    'nao foi confirmado',
+    'pagamento nao confirmado',
+    'pagamento ainda nao confirmado',
+    'pix nao caiu',
+    'pix ainda nao caiu',
+    'nao foi pago',
+    'ainda nao foi pago',
+    'servico nao concluido',
+    'servico ainda nao concluido'
+  ];
+
+  const hasNegativePattern =
+    negativePatterns.some(pattern =>
+      text.includes(pattern)
+    );
+
+  if (hasNegativePattern) {
+    return {
+      status: 'aguardando',
+      reason:
+        'Mensagem possui indicação de pendência ou negativa'
+    };
+  }
+
+  /*
+  COMPRA / SERVIÇO REALIZADO
+
+  Tem prioridade sobre "fechado".
+  */
+
+  const boughtPatterns = [
+    'pagamento confirmado',
+    'pix confirmado',
+    'pix recebido',
+    'pagamento recebido',
+    'pagamento aprovado',
+    'pedido pago',
+    'compra finalizada',
+    'compra concluida',
+    'venda finalizada',
+    'venda concluida',
+    'servico realizado',
+    'servico concluido',
+    'procedimento realizado',
+    'procedimento concluido',
+    'atendimento concluido',
+    'atendimento finalizado',
+    'parabens pela compra',
+    'obrigado pela compra',
+    'produto entregue',
+    'pedido entregue'
+  ];
+
+  const boughtMatch =
+    boughtPatterns.find(pattern =>
+      text.includes(pattern)
+    );
+
+  if (boughtMatch) {
+    return {
+      status: 'comprou',
+      reason:
+        `Frase reconhecida: "${boughtMatch}"`
+    };
+  }
+
+  /*
+  FECHADO / HORÁRIO MARCADO
+  */
+
+  const closedPatterns = [
+    'agendamento confirmado',
+    'horario confirmado',
+    'horario marcado',
+    'ficou marcado',
+    'esta agendado',
+    'esta agendada',
+    'agendado para',
+    'agendada para',
+    'confirmado para',
+    'confirmada para',
+    'pode vir',
+    'pode comparecer',
+    'te esperamos',
+    'esperamos voce',
+    'combinado para',
+    'fechado para',
+    'reserva confirmada',
+    'visita confirmada'
+  ];
+
+  const closedMatch =
+    closedPatterns.find(pattern =>
+      text.includes(pattern)
+    );
+
+  if (closedMatch) {
+    return {
+      status: 'fechado',
+      reason:
+        `Frase reconhecida: "${closedMatch}"`
+    };
+  }
+
+  /*
+  Nenhuma regra encontrada:
+  mensagem enviada normalmente fica aguardando resposta.
+  */
+
+  return {
+    status: 'aguardando',
+    reason:
+      'Mensagem enviada; aguardando resposta'
+  };
+}
+
+/*
+=====================================================
 POST /api/sendmessage
 ENVIA E SALVA A MENSAGEM NO CRM
 =====================================================
@@ -31,22 +186,30 @@ ENVIA E SALVA A MENSAGEM NO CRM
 
 router.post('/', async (req, res) => {
   try {
-    const tenantId = req.user.tenant_id;
-    const { lead_id, message } = req.body;
+    const tenantId =
+      req.user.tenant_id;
+
+    const {
+      lead_id,
+      message
+    } = req.body;
 
     if (!lead_id) {
       return res.status(400).json({
         success: false,
-        error: 'Lead não informado'
+        error:
+          'Lead não informado'
       });
     }
 
-    const cleanMessage = String(message || '').trim();
+    const cleanMessage =
+      String(message || '').trim();
 
     if (!cleanMessage) {
       return res.status(400).json({
         success: false,
-        error: 'Mensagem não pode ser vazia'
+        error:
+          'Mensagem não pode ser vazia'
       });
     }
 
@@ -56,31 +219,37 @@ router.post('/', async (req, res) => {
     =====================================================
     */
 
-    const leadResult = await db.query(
-      `
-      SELECT
-        id,
-        name,
-        phone
-      FROM leads
-      WHERE id = $1
-      AND tenant_id = $2
-      LIMIT 1
-      `,
-      [
-        lead_id,
-        tenantId
-      ]
-    );
+    const leadResult =
+      await db.query(
+        `
+        SELECT
+          id,
+          name,
+          phone,
+          status
+        FROM leads
+        WHERE id = $1
+        AND tenant_id = $2
+        LIMIT 1
+        `,
+        [
+          lead_id,
+          tenantId
+        ]
+      );
 
-    if (leadResult.rows.length === 0) {
+    if (
+      leadResult.rows.length === 0
+    ) {
       return res.status(404).json({
         success: false,
-        error: 'Lead não encontrado'
+        error:
+          'Lead não encontrado'
       });
     }
 
-    const lead = leadResult.rows[0];
+    const lead =
+      leadResult.rows[0];
 
     /*
     =====================================================
@@ -88,13 +257,15 @@ router.post('/', async (req, res) => {
     =====================================================
     */
 
-    let phone = String(lead.phone || '')
-      .replace(/\D/g, '');
+    let phone =
+      String(lead.phone || '')
+        .replace(/\D/g, '');
 
     if (!phone) {
       return res.status(400).json({
         success: false,
-        error: 'Lead sem telefone válido'
+        error:
+          'Lead sem telefone válido'
       });
     }
 
@@ -118,7 +289,9 @@ router.post('/', async (req, res) => {
 
     const endpoint =
       `${EVOLUTION_URL}/message/sendText/` +
-      encodeURIComponent(EVOLUTION_INSTANCE);
+      encodeURIComponent(
+        EVOLUTION_INSTANCE
+      );
 
     /*
     =====================================================
@@ -126,29 +299,30 @@ router.post('/', async (req, res) => {
     =====================================================
     */
 
-    const evolutionResponse = await axios({
-      method: 'post',
-      url: endpoint,
+    const evolutionResponse =
+      await axios({
+        method: 'post',
+        url: endpoint,
 
-      headers: {
-        apikey: EVOLUTION_API_KEY,
-        'Content-Type': 'application/json'
-      },
+        headers: {
+          apikey:
+            EVOLUTION_API_KEY,
 
-      data: {
-        number: phone,
-        text: cleanMessage
-      },
+          'Content-Type':
+            'application/json'
+        },
 
-      timeout: 20000
-    });
+        data: {
+          number: phone,
+          text: cleanMessage
+        },
+
+        timeout: 20000
+      });
 
     /*
     =====================================================
-    SALVA A MENSAGEM ENVIADA NO HISTÓRICO
-
-    O NOT EXISTS evita duplicação caso o webhook
-    também registre a mesma mensagem.
+    SALVA A MENSAGEM NO HISTÓRICO
     =====================================================
     */
 
@@ -176,7 +350,8 @@ router.post('/', async (req, res) => {
         AND lead_id = $2
         AND direction = 'outbound'
         AND message = $3
-        AND created_at >= NOW() - INTERVAL '15 seconds'
+        AND created_at >=
+          NOW() - INTERVAL '15 seconds'
       )
       `,
       [
@@ -188,7 +363,21 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    MOVE O LEAD PARA AGUARDANDO
+    IDENTIFICA O NOVO STATUS
+    =====================================================
+    */
+
+    const classification =
+      detectStatusFromMessage(
+        cleanMessage
+      );
+
+    const newStatus =
+      classification.status;
+
+    /*
+    =====================================================
+    ATUALIZA O LEAD
     =====================================================
     */
 
@@ -196,28 +385,126 @@ router.post('/', async (req, res) => {
       `
       UPDATE leads
       SET
-        status = 'aguardando',
+        status = $1,
         last_contact_at = NOW(),
-        updated_at = NOW()
-      WHERE id = $1
-      AND tenant_id = $2
+        updated_at = NOW(),
+
+        closed_at =
+          CASE
+            WHEN $1 = 'fechado'
+            THEN COALESCE(
+              closed_at,
+              NOW()
+            )
+            ELSE closed_at
+          END,
+
+        bought_at =
+          CASE
+            WHEN $1 = 'comprou'
+            THEN COALESCE(
+              bought_at,
+              NOW()
+            )
+            ELSE bought_at
+          END
+
+      WHERE id = $2
+      AND tenant_id = $3
       `,
       [
+        newStatus,
         lead_id,
         tenantId
       ]
     );
 
+    /*
+    =====================================================
+    REGISTRA A MUDANÇA NO HISTÓRICO
+    =====================================================
+    */
+
+    if (
+      newStatus !== lead.status
+    ) {
+      await db.query(
+        `
+        INSERT INTO lead_activities (
+          tenant_id,
+          lead_id,
+          user_id,
+          type,
+          description,
+          metadata
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          'status_change',
+          $4,
+          $5
+        )
+        `,
+        [
+          tenantId,
+          lead_id,
+          req.user.id,
+
+          `Status alterado automaticamente de "${lead.status}" para "${newStatus}"`,
+
+          JSON.stringify({
+            from:
+              lead.status,
+
+            to:
+              newStatus,
+
+            source:
+              'message_rule',
+
+            reason:
+              classification.reason,
+
+            message:
+              cleanMessage
+          })
+        ]
+      );
+    }
+
     console.log(
-      `✅ Mensagem enviada e salva: ${lead.name || phone}`
+      `✅ Mensagem enviada: ${lead.name || phone}`
+    );
+
+    console.log(
+      `🤖 Status identificado: ${newStatus} — ${classification.reason}`
     );
 
     return res.status(200).json({
       success: true,
       lead_id,
       phone,
-      message: cleanMessage,
-      evolution: evolutionResponse.data
+      message:
+        cleanMessage,
+
+      automation: {
+        previous_status:
+          lead.status,
+
+        new_status:
+          newStatus,
+
+        changed:
+          newStatus !== lead.status,
+
+        reason:
+          classification.reason
+      },
+
+      evolution:
+        evolutionResponse.data
     });
 
   } catch (error) {
@@ -237,14 +524,17 @@ router.post('/', async (req, res) => {
     console.error(
       '❌ Erro no envio:',
       {
-        message: error.message,
+        message:
+          error.message,
+
         status,
         details
       }
     );
 
     return res.status(
-      status >= 400 && status < 600
+      status >= 400 &&
+      status < 600
         ? status
         : 500
     ).json({
@@ -253,7 +543,9 @@ router.post('/', async (req, res) => {
       error:
         typeof errorMessage === 'string'
           ? errorMessage
-          : JSON.stringify(errorMessage),
+          : JSON.stringify(
+              errorMessage
+            ),
 
       details
     });
