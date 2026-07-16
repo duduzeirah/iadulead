@@ -722,22 +722,17 @@ router.patch('/:id', async (req, res) => {
       );
     }
 
+    const classificationChanged =
+      conversation_topic !== undefined ||
+      commercial_priority !== undefined ||
+      customer_relationship !== undefined;
+
     if (
       conversation_topic !== undefined
     ) {
       set(
         'conversation_topic',
         conversation_topic
-      );
-
-      set(
-        'classification_source',
-        'manual'
-      );
-
-      set(
-        'classification_confidence',
-        null
       );
     }
 
@@ -748,16 +743,6 @@ router.patch('/:id', async (req, res) => {
         'commercial_priority',
         commercial_priority
       );
-
-      set(
-        'classification_source',
-        'manual'
-      );
-
-      set(
-        'classification_confidence',
-        null
-      );
     }
 
     if (
@@ -766,16 +751,6 @@ router.patch('/:id', async (req, res) => {
       set(
         'customer_relationship',
         customer_relationship
-      );
-
-      set(
-        'classification_source',
-        'manual'
-      );
-
-      set(
-        'classification_confidence',
-        null
       );
     }
 
@@ -786,6 +761,11 @@ router.patch('/:id', async (req, res) => {
         'classification_source',
         classification_source
       );
+    } else if (classificationChanged) {
+      set(
+        'classification_source',
+        'manual'
+      );
     }
 
     if (
@@ -794,6 +774,11 @@ router.patch('/:id', async (req, res) => {
       set(
         'classification_confidence',
         classification_confidence
+      );
+    } else if (classificationChanged) {
+      set(
+        'classification_confidence',
+        null
       );
     }
 
