@@ -1599,7 +1599,23 @@ function renderDash() {
   $('dash-alerts').innerHTML=alerts;
 
   const stages=['novo','atendendo','aguardando','fechado','comprou','assinante'].map(s=>({s,l:statusLabel(s),c:statusCfg(s).color}));
-  $('dash-funnel').innerHTML=stages.map(s=>`<div class="funnel-step" onclick="go('${s.s==='comprou'?'compraram':s.s==='assinante'?'assinantes':s.s+'s'}',qp('${s.s==='comprou'?'compraram':s.s==='assinante'?'assinantes':s.s+'s'}'))"><div class="funnel-num" style="color:${s.c}">${c(s.s)}</div><div class="funnel-lbl">${s.l}</div></div>`).join('');
+  const funnelPages={
+    novo:'novos',
+    atendendo:'atendendo',
+    aguardando:'aguardando',
+    fechado:'fechados',
+    comprou:'compraram',
+    assinante:'assinantes'
+  };
+
+  $('dash-funnel').innerHTML=stages.map(s=>{
+    const page=funnelPages[s.s];
+
+    return `<div class="funnel-step" onclick="go('${page}',qp('${page}'))">
+      <div class="funnel-num" style="color:${s.c}">${c(s.s)}</div>
+      <div class="funnel-lbl">${s.l}</div>
+    </div>`;
+  }).join('');
 
   const acts=(dashData.activities||[]).slice(0,8);
   $('dash-activity').innerHTML=acts.length
