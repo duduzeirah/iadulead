@@ -645,13 +645,13 @@ router.post('/webhook', async (req, res) => {
       `
       UPDATE leads
       SET
-        status = $1,
+       status = $1::lead_status,
         last_contact_at = NOW(),
         updated_at = NOW(),
 
         closed_at =
           CASE
-            WHEN $1 = 'fechado'
+           WHEN $1::lead_status = 'fechado'::lead_status
             THEN COALESCE(
               closed_at,
               NOW()
@@ -661,7 +661,7 @@ router.post('/webhook', async (req, res) => {
 
         bought_at =
           CASE
-            WHEN $1 = 'comprou'
+            WHEN $1::lead_status = 'comprou'::lead_status
             THEN COALESCE(
               bought_at,
               NOW()
