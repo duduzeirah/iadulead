@@ -690,5 +690,94 @@ router.delete('/:id', async (req, res) => {
     });
   }
 });
+/*
+=====================================================
+POST /api/automations/test/message
+TESTA UMA MENSAGEM SEM ALTERAR NENHUM LEAD
+=====================================================
+*/
+
+router.post('/test/message', async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+
+    const {
+      event_type,
+      message
+    } = req.body;
+
+    if (
+      ![
+        'outbound_message',
+        'inbound_message'
+      ].includes(event_type)
+    ) {
+      return res.status(400).json({
+        error: 'Tipo de evento inválido'
+      });
+    }
+
+    const cleanMessage =
+      String(message || '').trim();
+
+    if (!cleanMessage) {
+      return res.status(400).json({
+        error: 'Digite uma mensagem para testar'
+      });
+    }
+
+    const {
+      findMessageRule
+    } = require('../services/automationEngine');
+
+    const match =
+      await findMessageRule({
+        tenantId,
+        eventType: event_type,
+        message: cleanMessage
+      });
+
+    if (!match) {
+      return res.json({
+        matched: false,
+        message: cleanMessage,
+        reason:
+          'Nenhuma automação reconheceu essa mensagem'
+      });
+    }
+
+    return res.json({
+      matched: true,
+      message: cleanMessage,
+
+      rule: {
+        id: match.rule.id,
+        name: match.rule.name,
+        event_type:
+          match.rule.event_type,
+        action_status:
+          match.rule.action_status,
+        priority:
+          match.rule.priority
+      },
+
+      matched_keyword:
+        match.matchedKeyword,
+
+      reason:
+        match.reason
+    });
+
+  } catch (error) {
+    console.error(
+      'Erro ao testar automação:',
+      error
+    );
+
+    return res.status(500).json({
+      error: 'Erro ao testar automação'
+    });
+  }
+});
 
 module.exports = router;
