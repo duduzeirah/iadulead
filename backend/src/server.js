@@ -56,6 +56,10 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/leads', require('./routes/leads'));
 app.use('/api/reminders', require('./routes/reminders'));
 app.use('/api/templates', require('./routes/templates'));
+app.use(
+  '/api/automations',
+  require('./routes/automations')
+);
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/messages', require('./routes/messages'));
