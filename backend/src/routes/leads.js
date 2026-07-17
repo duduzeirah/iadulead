@@ -3,6 +3,10 @@ const express = require('express');
 const { query } = require('../db');
 const { auth } = require('../middleware/auth');
 
+const {
+  processClassificationAutomation
+} = require('../services/automationEngine');
+
 const router = express.Router();
 router.use(auth);
 
@@ -859,25 +863,90 @@ router.patch('/:id', async (req, res) => {
       id,
       tid
     );
+const {
+  rows: [
+    updated
+  ]
+} = await query(
+  `
+  UPDATE leads
+  SET
+    ${updates.join(', ')},
+    updated_at = NOW()
+  WHERE id = $${p}
+  AND tenant_id = $${p + 1}
+  RETURNING *
+  `,
+  vals
+);
 
-    const {
-      rows: [
-        updated
-      ]
-    } = await query(
-      `
-      UPDATE leads
-      SET
-        ${updates.join(', ')},
-        updated_at = NOW()
-      WHERE id = $${p}
-      AND tenant_id = $${p + 1}
-      RETURNING *
-      `,
-      vals
-    );
+let finalLead = updated;
 
-    return res.json(updated);
+/*
+=====================================================
+AUTOMAÇÕES DE CLASSIFICAÇÃO
+=====================================================
+*/
+
+const classificationChanges = [];
+
+if (
+  commercial_priority !== undefined &&
+  commercial_priority !== current.commercial_priority
+) {
+  classificationChanges.push({
+    field: 'commercial_priority',
+    value: commercial_priority
+  });
+}
+
+if (
+  conversation_topic !== undefined &&
+  conversation_topic !== current.conversation_topic
+) {
+  classificationChanges.push({
+    field: 'conversation_topic',
+    value: conversation_topic
+  });
+}
+
+if (
+  customer_relationship !== undefined &&
+  customer_relationship !== current.customer_relationship
+) {
+  classificationChanges.push({
+    field: 'customer_relationship',
+    value: customer_relationship
+  });
+}
+
+for (const change of classificationChanges) {
+  const automation =
+    await processClassificationAutomation({
+      tenantId: tid,
+      leadId: id,
+      userId: req.user.id,
+
+      currentStatus:
+        finalLead.status,
+
+      field:
+        change.field,
+
+      value:
+        change.value
+    });
+
+  if (
+    automation.changed &&
+    automation.lead
+  ) {
+    finalLead =
+      automation.lead;
+  }
+}
+
+return res.json(finalLead);
 
   } catch (err) {
     console.error(
