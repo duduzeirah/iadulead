@@ -1193,7 +1193,7 @@ function renderTodos(filter) {
   $('todos-body').innerHTML=filtered.length?filtered.map(l=>`<tr>
     <td><div style="display:flex;align-items:center;gap:8px"><div class="av" style="background:${avColor(l.id)}22;color:${avColor(l.id)}">${ini(l.name)}</div><div style="font-weight:600">${esc(l.name)}</div></div></td>
     <td style="color:var(--t2);font-size:12px">${esc(l.phone)}</td>
-    <td><span class="pill pill-${l.status}">${pillLabel(l.status)}</span></td>
+    <td><span id="chat-status-pill" class="pill pill-${l.status}">${pillLabel(l.status)}</span></td>
     <td style="font-size:12px">${l.product?esc(l.product):'—'}</td>
     <td style="font-weight:600;font-size:12px">${fmtBRL(l.estimated_value)}</td>
     <td style="font-size:12px;color:var(--t2)">${esc(l.origin||'')}</td>
@@ -1405,7 +1405,7 @@ async function refreshOpenChat(silent=true){
 function startChatRefresh(leadId){
   stopChatRefresh();
   activeChatLeadId=leadId;
-  chatRefreshTimer=setInterval(()=>refreshOpenChat(true),3000);
+  chatRefreshTimer=setInterval(()=>refreshOpenChat(true),2000);
 }
 
 function stopChatRefresh(){
@@ -1489,7 +1489,7 @@ async function openDetail(id){
           <div>
             <div class="ld-name">${esc(l.name)}</div>
             <div class="ld-phone">${esc(l.phone)}</div>
-            <div style="margin-top:6px"><span class="pill pill-${l.status}">${pillLabel(l.status)}</span></div>
+            <div style="margin-top:6px"><span id="side-status-pill" class="pill pill-${l.status}">${pillLabel(l.status)}</span></div>
           </div>
         </div>
 
@@ -1804,10 +1804,25 @@ const _ri=$('rem-date'); if(_ri) _ri.value=new Date().toISOString().split('T')[0
 //  INIT
 // ============================================================
 
+function refreshOpenLeadStatus(){
+  if(!activeChatLeadId) return;
+  const lead=leads.find(x=>x.id===activeChatLeadId);
+  if(!lead) return;
+
+  ['chat-status-pill','side-status-pill'].forEach(id=>{
+    const el=$(id);
+    if(!el) return;
+    el.className=`pill pill-${lead.status}`;
+    el.textContent=pillLabel(lead.status);
+  });
+}
+
 async function refreshOperationalView(){
-  if(!token||!me) return;
+  if(!token||!me||document.hidden) return;
   try{
     await loadLeads();
+    refreshOpenLeadStatus();
+
     const page=q('.sb-item.active')?.dataset?.page||'dashboard';
     renderPage(page);
   }catch(e){}
@@ -1815,7 +1830,7 @@ async function refreshOperationalView(){
 
 function startAutomaticRefresh(){
   if(automaticRefreshTimer) clearInterval(automaticRefreshTimer);
-  automaticRefreshTimer=setInterval(refreshOperationalView,5000);
+  automaticRefreshTimer=setInterval(refreshOperationalView,2000);
 }
 
 boot();
