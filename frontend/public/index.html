@@ -1372,9 +1372,12 @@ function renderAutomations(){
   }).join('');
 }
 
-async function loadAutomations(){
+async function loadAutomations(showLoader=true){
   const wrap=$('automation-list');
-  if(wrap){
+
+  // O loader só aparece ao abrir a página pela primeira vez.
+  // Atualizações posteriores acontecem sem apagar os cards.
+  if(showLoader && wrap && !automationRules.length){
     wrap.innerHTML=`<div class="auto-empty"><div class="empty"><div class="loader"></div><p style="margin-top:10px">Carregando automações...</p></div></div>`;
   }
 
@@ -1383,7 +1386,7 @@ async function loadAutomations(){
     automationRules=response.automations||[];
     renderAutomations();
   }catch(e){
-    if(wrap){
+    if(showLoader && wrap && !automationRules.length){
       wrap.innerHTML=`<div class="auto-empty"><div class="alert danger"><div class="alert-icon">❌</div><div><strong>Não foi possível carregar as automações.</strong><br>${esc(e.message)}</div></div></div>`;
     }
     toast(e.message||'Erro ao carregar automações','err');
@@ -2295,18 +2298,28 @@ function refreshOpenLeadStatus(){
 
 async function refreshOperationalView(){
   if(!token||!me||document.hidden) return;
+
   try{
+    const page=q('.sb-item.active')?.dataset?.page||'dashboard';
+
+    // A página de automações não depende da lista de leads.
+    // Evita recarregar a tela e causar o efeito de piscar.
+    if(page==='automacoes'){
+      return;
+    }
+
     await loadLeads();
     refreshOpenLeadStatus();
-
-    const page=q('.sb-item.active')?.dataset?.page||'dashboard';
     renderPage(page);
   }catch(e){}
 }
 
 function startAutomaticRefresh(){
   if(automaticRefreshTimer) clearInterval(automaticRefreshTimer);
-  automaticRefreshTimer=setInterval(refreshOperationalView,2000);
+
+  // Atualização geral a cada 5 segundos.
+  // O chat aberto continua com seu próprio intervalo mais rápido.
+  automaticRefreshTimer=setInterval(refreshOperationalView,5000);
 }
 
 boot();
