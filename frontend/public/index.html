@@ -377,6 +377,38 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
   .chat-bubble{max-width:88%}
 }
 
+
+/* AUTOMAÇÕES */
+.auto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.auto-card{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:16px;transition:all .15s}
+.auto-card:hover{border-color:rgba(0,197,102,.45)}
+.auto-card.off{opacity:.62}
+.auto-card-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:12px}
+.auto-card-icon{width:36px;height:36px;border-radius:10px;background:var(--brand-pale);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.auto-card-info{min-width:0;flex:1}
+.auto-card-name{font-size:13px;font-weight:700;line-height:1.35}
+.auto-card-event{font-size:10px;color:var(--t3);margin-top:3px;text-transform:uppercase;letter-spacing:.5px}
+.auto-flow{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:11px;color:var(--t2);line-height:1.5}
+.auto-flow-box{padding:5px 8px;border-radius:6px;background:var(--bg3);border:1px solid var(--b1)}
+.auto-arrow{color:var(--brand);font-weight:800}
+.auto-keywords{margin-top:10px;display:flex;gap:5px;flex-wrap:wrap}
+.auto-keyword{font-size:10px;padding:3px 7px;border-radius:20px;background:rgba(74,144,226,.12);color:var(--info);border:1px solid rgba(74,144,226,.2)}
+.auto-keyword.neg{background:rgba(240,77,91,.1);color:var(--danger);border-color:rgba(240,77,91,.2)}
+.auto-card-foot{display:flex;align-items:center;gap:6px;margin-top:14px;padding-top:11px;border-top:1px solid var(--b1)}
+.auto-status{font-size:10px;font-weight:700;margin-right:auto}
+.auto-status.on{color:var(--brand)}.auto-status.off{color:var(--t3)}
+.auto-empty{grid-column:1/-1}
+.auto-form-section{padding:12px 0;border-bottom:1px solid var(--b1)}
+.auto-form-section:last-child{border-bottom:none}
+.auto-form-title{font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px}
+.auto-help{font-size:11px;color:var(--t3);line-height:1.55;margin-top:5px}
+.auto-textarea{min-height:92px!important}
+.auto-test-result{margin-top:10px;padding:10px 12px;border-radius:var(--r-sm);background:var(--bg3);border:1px solid var(--b1);font-size:12px;color:var(--t2);display:none}
+@media(max-width:600px){
+  .auto-grid{grid-template-columns:1fr}
+  #m-automation .modal-box{padding:20px 16px}
+}
+
 /* CONFIG */
 .cfg-section{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:18px;margin-bottom:14px}
 .cfg-title{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
@@ -525,6 +557,7 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
       <button class="sb-item" data-page="remarketing" onclick="go('remarketing',this)"><span class="sb-icon">📣</span>Remarketing</button>
       <button class="sb-item" data-page="lembretes" onclick="go('lembretes',this)"><span class="sb-icon">⏰</span>Lembretes</button>
       <button class="sb-item" data-page="templates" onclick="go('templates',this)"><span class="sb-icon">📝</span>Mensagens Prontas</button>
+      <button class="sb-item" data-page="automacoes" onclick="go('automacoes',this)"><span class="sb-icon">🤖</span>Automações</button>
       <button class="sb-item" data-page="config" onclick="go('config',this)"><span class="sb-icon">⚙️</span>Configurações</button>
     </div>
     <div id="sb-trial-box" class="sb-trial hidden">
@@ -634,6 +667,30 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
           <button class="tab" onclick="stab(this,'tt-vd')">Venda</button>
         </div>
         <div id="tt-fu"></div><div id="tt-bv" style="display:none"></div><div id="tt-re" style="display:none"></div><div id="tt-vd" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- AUTOMAÇÕES -->
+    <div class="page" id="pg-automacoes">
+      <div class="page-inner">
+        <div class="sec-hdr">
+          <div>
+            <h2>🤖 Automações</h2>
+            <p>Crie regras para organizar os atendimentos automaticamente</p>
+          </div>
+          <button class="btn btn-brand btn-sm" onclick="openAutomationModal()">+ Nova automação</button>
+        </div>
+
+        <div class="alert brand">
+          <div class="alert-icon">⚡</div>
+          <div>
+            As regras são executadas pela ordem de prioridade. Quanto menor o número, mais cedo a regra é verificada.
+          </div>
+        </div>
+
+        <div id="automation-list" class="auto-grid">
+          <div class="auto-empty"><div class="empty"><div class="loader"></div><p style="margin-top:10px">Carregando automações...</p></div></div>
+        </div>
       </div>
     </div>
 
@@ -754,6 +811,112 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
   </div>
 </div>
 
+
+<div class="modal-bg" id="m-automation">
+  <div class="modal-box wide">
+    <button class="modal-close" onclick="closeM('m-automation')">✕</button>
+    <div class="modal-title" id="auto-modal-title">🤖 Nova automação</div>
+
+    <input type="hidden" id="auto-id">
+
+    <div class="auto-form-section">
+      <div class="auto-form-title">Informações</div>
+      <div class="form-group">
+        <label>Nome da automação *</label>
+        <input type="text" id="auto-name" placeholder="Ex: Cliente confirmou agendamento">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Quando acontecer *</label>
+          <select id="auto-event" onchange="updateAutomationForm()">
+            <option value="outbound_message">Mensagem enviada pela equipe</option>
+            <option value="inbound_message">Mensagem recebida do cliente</option>
+            <option value="classification_change">Classificação alterada</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Prioridade da regra</label>
+          <input type="number" id="auto-priority" value="100" min="1" max="9999">
+          <div class="form-hint">Números menores executam primeiro.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="auto-form-section" id="auto-message-fields">
+      <div class="auto-form-title">Condição da mensagem</div>
+
+      <div class="form-group">
+        <label>Modo de reconhecimento</label>
+        <select id="auto-match-mode">
+          <option value="contains_any">Contém qualquer uma das frases</option>
+          <option value="contains_all">Contém todas as frases</option>
+          <option value="exact">Mensagem exatamente igual</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Palavras ou frases *</label>
+        <textarea id="auto-keywords" class="auto-textarea" placeholder="Uma frase por linha. Ex:&#10;agendamento confirmado&#10;horário marcado&#10;confirmado para"></textarea>
+        <div class="auto-help">Digite uma palavra ou frase por linha.</div>
+      </div>
+
+      <div class="form-group">
+        <label>Frases negativas que bloqueiam a regra</label>
+        <textarea id="auto-negative-keywords" class="auto-textarea" placeholder="Uma frase por linha. Ex:&#10;não confirmado&#10;ainda não paguei"></textarea>
+        <div class="auto-help">Caso uma dessas frases apareça, a regra não será executada.</div>
+      </div>
+    </div>
+
+    <div class="auto-form-section hidden" id="auto-classification-fields">
+      <div class="auto-form-title">Condição da classificação</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Campo *</label>
+          <select id="auto-classification-field" onchange="refreshAutomationClassificationValues()">
+            <option value="commercial_priority">Prioridade comercial</option>
+            <option value="conversation_topic">Assunto</option>
+            <option value="customer_relationship">Relação com a empresa</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Quando o valor for *</label>
+          <select id="auto-classification-value"></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="auto-form-section">
+      <div class="auto-form-title">Ação</div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Mover para a etapa *</label>
+          <select id="auto-action-status"></select>
+        </div>
+
+        <div class="form-group">
+          <label>Status da automação</label>
+          <select id="auto-enabled">
+            <option value="true">Ativa</option>
+            <option value="false">Desativada</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-err" id="auto-error"></div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeM('m-automation')">Cancelar</button>
+      <button class="btn btn-brand" id="auto-save-btn" onclick="saveAutomation()">Salvar automação</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-bg" id="m-confirm">
   <div class="modal-box" style="max-width:360px;text-align:center">
     <div style="font-size:40px;margin-bottom:12px" id="conf-icon">⚠️</div>
@@ -793,6 +956,7 @@ let dashData = {};
 let activeChatLeadId = null;
 let chatRefreshTimer = null;
 let automaticRefreshTimer = null;
+let automationRules = [];
 
 const PIPELINE_DEFAULTS={
   novo:{label:'Novos Leads',description:'Contato recém-chegado',color:'#00C566',order:1},
@@ -1052,7 +1216,7 @@ async function loadDash() {
 // ============================================================
 //  NAV
 // ============================================================
-const PT={dashboard:'Dashboard',pipeline:'Pipeline Kanban',todos:'Todos os Leads',remarketing:'Remarketing',lembretes:'Lembretes',templates:'Mensagens Prontas',config:'Configurações'};
+const PT={dashboard:'Dashboard',pipeline:'Pipeline Kanban',todos:'Todos os Leads',remarketing:'Remarketing',lembretes:'Lembretes',templates:'Mensagens Prontas',automacoes:'Automações',config:'Configurações'};
 const PAGE_STATUS={novos:'novo',atendendo:'atendendo',aguardando:'aguardando',fechados:'fechado',compraram:'comprou',assinantes:'assinante',inativos:'inativo',sumidos:'sumido'};
 
 function go(page,el) {
@@ -1077,8 +1241,320 @@ function renderPage(page) {
   else if(page==='remarketing') renderRemarketing();
   else if(page==='lembretes') renderLembretes();
   else if(page==='templates') renderTemplates();
+  else if(page==='automacoes') loadAutomations();
   else if(page==='config') renderPipelineConfig();
   else if(sm[page]) renderStatusPage(page,sm[page]);
+}
+
+
+// ============================================================
+//  AUTOMAÇÕES
+// ============================================================
+const AUTO_EVENT_LABELS={
+  outbound_message:'Mensagem enviada pela equipe',
+  inbound_message:'Mensagem recebida do cliente',
+  classification_change:'Classificação alterada'
+};
+
+const AUTO_FIELD_LABELS={
+  commercial_priority:'Prioridade comercial',
+  conversation_topic:'Assunto',
+  customer_relationship:'Relação com a empresa'
+};
+
+const AUTO_CLASSIFICATION_VALUES={
+  commercial_priority:[
+    ['comum','Atendimento comum'],
+    ['acompanhar','Acompanhar'],
+    ['negociacao','Em negociação'],
+    ['quente','Quente'],
+    ['urgente','Urgente'],
+    ['resolvido','Resolvido']
+  ],
+  conversation_topic:[
+    ['nao_identificado','Não identificado'],
+    ['protese','Prótese capilar'],
+    ['corte','Corte'],
+    ['barba','Barba'],
+    ['manutencao','Manutenção'],
+    ['agendamento','Agendamento'],
+    ['orcamento','Orçamento'],
+    ['curso','Curso'],
+    ['plano','Plano'],
+    ['financeiro','Financeiro'],
+    ['parceria','Parceria'],
+    ['outro','Outro']
+  ],
+  customer_relationship:[
+    ['nao_identificado','Não identificado'],
+    ['primeiro_contato','Primeiro contato'],
+    ['cliente_conhecido','Cliente conhecido'],
+    ['ex_cliente','Ex-cliente'],
+    ['parceiro','Parceiro'],
+    ['fornecedor','Fornecedor']
+  ]
+};
+
+function splitAutomationLines(value=''){
+  return String(value)
+    .split(/\r?\n/)
+    .map(v=>v.trim())
+    .filter(Boolean);
+}
+
+function automationEventIcon(eventType){
+  if(eventType==='outbound_message') return '📤';
+  if(eventType==='inbound_message') return '📥';
+  return '🏷️';
+}
+
+function automationConditionText(rule){
+  if(rule.event_type==='classification_change'){
+    const field=AUTO_FIELD_LABELS[rule.classification_field]||rule.classification_field||'Classificação';
+    const values=AUTO_CLASSIFICATION_VALUES[rule.classification_field]||[];
+    const found=values.find(v=>v[0]===rule.classification_value);
+    return `${field}: ${found?found[1]:(rule.classification_value||'—')}`;
+  }
+
+  const mode={
+    contains_any:'Contém qualquer frase',
+    contains_all:'Contém todas as frases',
+    exact:'Mensagem exatamente igual'
+  }[rule.match_mode]||'Contém frase';
+
+  return mode;
+}
+
+function renderAutomations(){
+  const wrap=$('automation-list');
+  if(!wrap) return;
+
+  if(!automationRules.length){
+    wrap.innerHTML=`<div class="auto-empty"><div class="empty"><div class="ei">🤖</div><h3>Nenhuma automação criada</h3><p>Crie sua primeira regra para organizar os atendimentos automaticamente.</p><button class="btn btn-brand" style="margin-top:14px" onclick="openAutomationModal()">+ Criar automação</button></div></div>`;
+    return;
+  }
+
+  wrap.innerHTML=automationRules.map(rule=>{
+    const keywords=(rule.keywords||[]).slice(0,5);
+    const negatives=(rule.negative_keywords||[]).slice(0,3);
+    const extra=Math.max(0,(rule.keywords||[]).length-keywords.length);
+
+    return `<div class="auto-card ${rule.enabled?'':'off'}">
+      <div class="auto-card-head">
+        <div class="auto-card-icon">${automationEventIcon(rule.event_type)}</div>
+        <div class="auto-card-info">
+          <div class="auto-card-name">${esc(rule.name)}</div>
+          <div class="auto-card-event">${esc(AUTO_EVENT_LABELS[rule.event_type]||rule.event_type)} · prioridade ${Number(rule.priority)||100}</div>
+        </div>
+      </div>
+
+      <div class="auto-flow">
+        <span class="auto-flow-box">${esc(automationConditionText(rule))}</span>
+        <span class="auto-arrow">→</span>
+        <span class="auto-flow-box">Mover para <strong>${esc(statusLabel(rule.action_status))}</strong></span>
+      </div>
+
+      ${rule.event_type!=='classification_change' && (keywords.length||negatives.length)?`
+        <div class="auto-keywords">
+          ${keywords.map(k=>`<span class="auto-keyword">${esc(k)}</span>`).join('')}
+          ${extra?`<span class="auto-keyword">+${extra}</span>`:''}
+          ${negatives.map(k=>`<span class="auto-keyword neg">bloqueia: ${esc(k)}</span>`).join('')}
+        </div>
+      `:''}
+
+      <div class="auto-card-foot">
+        <span class="auto-status ${rule.enabled?'on':'off'}">${rule.enabled?'● Ativa':'● Desativada'}</span>
+        <button class="btn btn-outline btn-sm" onclick="editAutomation('${rule.id}')">Editar</button>
+        <button class="btn btn-outline btn-sm" onclick="toggleAutomation('${rule.id}')">${rule.enabled?'Pausar':'Ativar'}</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="deleteAutomation('${rule.id}')">Excluir</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadAutomations(){
+  const wrap=$('automation-list');
+  if(wrap){
+    wrap.innerHTML=`<div class="auto-empty"><div class="empty"><div class="loader"></div><p style="margin-top:10px">Carregando automações...</p></div></div>`;
+  }
+
+  try{
+    const response=await api('GET','/automations');
+    automationRules=response.automations||[];
+    renderAutomations();
+  }catch(e){
+    if(wrap){
+      wrap.innerHTML=`<div class="auto-empty"><div class="alert danger"><div class="alert-icon">❌</div><div><strong>Não foi possível carregar as automações.</strong><br>${esc(e.message)}</div></div></div>`;
+    }
+    toast(e.message||'Erro ao carregar automações','err');
+  }
+}
+
+function refreshAutomationStatusOptions(selected=''){
+  const select=$('auto-action-status');
+  if(!select) return;
+
+  select.innerHTML=orderedStatuses()
+    .map(status=>`<option value="${status}">${esc(statusLabel(status))}</option>`)
+    .join('');
+
+  select.value=selected||'aguardando';
+}
+
+function refreshAutomationClassificationValues(selected=''){
+  const field=$('auto-classification-field')?.value||'commercial_priority';
+  const select=$('auto-classification-value');
+  if(!select) return;
+
+  const values=AUTO_CLASSIFICATION_VALUES[field]||[];
+  select.innerHTML=values
+    .map(([value,label])=>`<option value="${value}">${esc(label)}</option>`)
+    .join('');
+
+  if(selected && values.some(v=>v[0]===selected)){
+    select.value=selected;
+  }
+}
+
+function updateAutomationForm(){
+  const eventType=$('auto-event')?.value||'outbound_message';
+  const isClassification=eventType==='classification_change';
+
+  $('auto-message-fields')?.classList.toggle('hidden',isClassification);
+  $('auto-classification-fields')?.classList.toggle('hidden',!isClassification);
+}
+
+function clearAutomationForm(){
+  $('auto-id').value='';
+  $('auto-name').value='';
+  $('auto-event').value='outbound_message';
+  $('auto-priority').value='100';
+  $('auto-match-mode').value='contains_any';
+  $('auto-keywords').value='';
+  $('auto-negative-keywords').value='';
+  $('auto-classification-field').value='commercial_priority';
+  $('auto-enabled').value='true';
+  $('auto-error').textContent='';
+
+  refreshAutomationClassificationValues('resolvido');
+  refreshAutomationStatusOptions('aguardando');
+  updateAutomationForm();
+}
+
+function openAutomationModal(){
+  clearAutomationForm();
+  $('auto-modal-title').textContent='🤖 Nova automação';
+  $('auto-save-btn').textContent='Salvar automação';
+  openM('m-automation');
+}
+
+function editAutomation(id){
+  const rule=automationRules.find(item=>item.id===id);
+  if(!rule) return;
+
+  clearAutomationForm();
+
+  $('auto-id').value=rule.id;
+  $('auto-name').value=rule.name||'';
+  $('auto-event').value=rule.event_type||'outbound_message';
+  $('auto-priority').value=Number(rule.priority)||100;
+  $('auto-match-mode').value=rule.match_mode||'contains_any';
+  $('auto-keywords').value=(rule.keywords||[]).join('\n');
+  $('auto-negative-keywords').value=(rule.negative_keywords||[]).join('\n');
+  $('auto-classification-field').value=rule.classification_field||'commercial_priority';
+  $('auto-enabled').value=String(Boolean(rule.enabled));
+
+  refreshAutomationClassificationValues(rule.classification_value||'');
+  refreshAutomationStatusOptions(rule.action_status||'aguardando');
+  updateAutomationForm();
+
+  $('auto-modal-title').textContent='✏️ Editar automação';
+  $('auto-save-btn').textContent='Salvar alterações';
+  openM('m-automation');
+}
+
+async function saveAutomation(){
+  const button=$('auto-save-btn');
+  const error=$('auto-error');
+  const id=$('auto-id').value;
+  const eventType=$('auto-event').value;
+
+  error.textContent='';
+
+  const body={
+    name:$('auto-name').value.trim(),
+    event_type:eventType,
+    match_mode:$('auto-match-mode').value,
+    keywords:splitAutomationLines($('auto-keywords').value),
+    negative_keywords:splitAutomationLines($('auto-negative-keywords').value),
+    classification_field:null,
+    classification_value:null,
+    action_status:$('auto-action-status').value,
+    enabled:$('auto-enabled').value==='true',
+    priority:Number($('auto-priority').value)||100
+  };
+
+  if(eventType==='classification_change'){
+    body.keywords=[];
+    body.negative_keywords=[];
+    body.match_mode='exact';
+    body.classification_field=$('auto-classification-field').value;
+    body.classification_value=$('auto-classification-value').value;
+  }
+
+  if(!body.name){
+    error.textContent='Informe o nome da automação.';
+    return;
+  }
+
+  if(eventType!=='classification_change' && !body.keywords.length){
+    error.textContent='Informe pelo menos uma palavra ou frase.';
+    return;
+  }
+
+  setBtnLoading(button,true);
+
+  try{
+    if(id){
+      await api('PATCH',`/automations/${id}`,body);
+      toast('Automação atualizada!','ok');
+    }else{
+      await api('POST','/automations',body);
+      toast('Automação criada!','ok');
+    }
+
+    closeM('m-automation');
+    await loadAutomations();
+  }catch(e){
+    error.textContent=e.message||'Erro ao salvar automação';
+  }finally{
+    setBtnLoading(button,false);
+  }
+}
+
+async function toggleAutomation(id){
+  try{
+    await api('PATCH',`/automations/${id}/toggle`,{});
+    toast('Status da automação alterado','ok');
+    await loadAutomations();
+  }catch(e){
+    toast(e.message||'Erro ao alterar automação','err');
+  }
+}
+
+function deleteAutomation(id){
+  const rule=automationRules.find(item=>item.id===id);
+  if(!rule) return;
+
+  confirm$('🗑️','Excluir automação',`Excluir "${rule.name}"? Essa ação não pode ser desfeita.`,async()=>{
+    try{
+      await api('DELETE',`/automations/${id}`);
+      toast('Automação excluída','ok');
+      await loadAutomations();
+    }catch(e){
+      toast(e.message||'Erro ao excluir automação','err');
+    }
+  });
 }
 
 // ============================================================
