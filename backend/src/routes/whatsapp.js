@@ -1,6 +1,10 @@
 const express = require('express');
 const db = require('../db');
 
+const {
+  processMessageAutomation
+} = require('../services/automationEngine');
+
 const router = express.Router();
 
 const DEFAULT_TENANT_ID =
@@ -8,316 +12,7 @@ const DEFAULT_TENANT_ID =
 
 /*
 =====================================================
-NORMALIZA O TEXTO
-=====================================================
-*/
-
-function normalizeText(text = '') {
-  return String(text)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s:]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/*
-=====================================================
-IDENTIFICA STATUS PELA CONVERSA
-=====================================================
-*/
-
-function detectStatusFromMessage(message, direction) {
-  const text = normalizeText(message);
-
-  if (!text) {
-    return {
-      status: null,
-      reason: 'Mensagem sem texto reconhecível'
-    };
-  }
-
-  /*
-  Evita movimentações erradas por frases negativas.
-  */
-
-  const negativePatterns = [
-    'nao confirmado',
-    'nao esta confirmado',
-    'ainda nao confirmado',
-    'ainda nao esta confirmado',
-    'nao confirmou',
-    'nao foi confirmado',
-    'nao posso confirmar',
-    'nao consigo confirmar',
-    'nao quero marcar',
-    'nao quero agendar',
-    'nao posso ir',
-    'nao vou conseguir ir',
-    'pagamento nao confirmado',
-    'pagamento ainda nao confirmado',
-    'pix nao caiu',
-    'pix ainda nao caiu',
-    'nao foi pago',
-    'ainda nao foi pago',
-    'nao paguei',
-    'servico nao concluido',
-    'servico ainda nao concluido',
-    'pedido nao finalizado'
-  ];
-
-  const negativeMatch =
-    negativePatterns.find(pattern =>
-      text.includes(pattern)
-    );
-
-  if (negativeMatch) {
-    return {
-      status: null,
-      reason: `Frase negativa identificada: "${negativeMatch}"`
-    };
-  }
-
-  /*
-  =====================================================
-  COMPRA / SERVIÇO REALIZADO
-  =====================================================
-  */
-
-  const boughtPatterns = [
-    'pagamento confirmado',
-    'pagamento recebido',
-    'pagamento aprovado',
-    'pix confirmado',
-    'pix recebido',
-    'pix caiu',
-    'pedido pago',
-    'compra finalizada',
-    'compra concluida',
-    'venda finalizada',
-    'venda concluida',
-    'servico realizado',
-    'servico concluido',
-    'procedimento realizado',
-    'procedimento concluido',
-    'atendimento concluido',
-    'atendimento finalizado',
-    'parabens pela compra',
-    'obrigado pela compra',
-    'agradecemos pela compra',
-    'produto entregue',
-    'pedido entregue',
-    'pedido finalizado',
-    'finalizamos seu atendimento',
-    'finalizamos o atendimento'
-  ];
-
-  /*
-  Algumas frases podem vir do próprio cliente.
-  */
-
-  const customerBoughtPatterns = [
-    'ja fiz o pix',
-    'acabei de fazer o pix',
-    'pix feito',
-    'ja paguei',
-    'acabei de pagar',
-    'pagamento realizado',
-    'pagamento feito',
-    'comprovante enviado'
-  ];
-
-  const boughtMatch =
-    boughtPatterns.find(pattern =>
-      text.includes(pattern)
-    );
-
-  if (boughtMatch) {
-    return {
-      status: 'comprou',
-      reason: `Compra ou serviço identificado: "${boughtMatch}"`
-    };
-  }
-
-  if (direction === 'inbound') {
-    const customerBoughtMatch =
-      customerBoughtPatterns.find(pattern =>
-        text.includes(pattern)
-      );
-
-    if (customerBoughtMatch) {
-      return {
-        status: 'comprou',
-        reason: `Cliente informou pagamento: "${customerBoughtMatch}"`
-      };
-    }
-  }
-
-  /*
-  =====================================================
-  FECHADO / AGENDADO
-  =====================================================
-  */
-
-  const closedPatterns = [
-    'agendamento confirmado',
-    'agendamento realizado',
-    'horario confirmado',
-    'horario marcado',
-    'ficou marcado',
-    'ficou agendado',
-    'ficou agendada',
-    'esta agendado',
-    'esta agendada',
-    'agendado para',
-    'agendada para',
-    'confirmado para',
-    'confirmada para',
-    'confirmamos para',
-    'confirmamos seu horario',
-    'seu horario esta confirmado',
-    'pode vir',
-    'pode comparecer',
-    'te esperamos',
-    'esperamos voce',
-    'combinado para',
-    'fechado para',
-    'reserva confirmada',
-    'visita confirmada',
-    'consulta confirmada'
-  ];
-
-  const customerClosedPatterns = [
-    'pode marcar',
-    'pode agendar',
-    'quero marcar',
-    'quero agendar',
-    'pode confirmar',
-    'confirmo',
-    'esta confirmado',
-    'estou confirmado',
-    'vou sim',
-    'eu vou',
-    'estarei ai',
-    'pode deixar marcado',
-    'esse horario serve',
-    'esse horario esta bom',
-    'esse horario ta bom',
-    'combinado',
-    'fechado'
-  ];
-
-  const closedMatch =
-    closedPatterns.find(pattern =>
-      text.includes(pattern)
-    );
-
-  if (closedMatch) {
-    return {
-      status: 'fechado',
-      reason: `Agendamento identificado: "${closedMatch}"`
-    };
-  }
-
-  if (direction === 'inbound') {
-    const customerClosedMatch =
-      customerClosedPatterns.find(pattern =>
-        text.includes(pattern)
-      );
-
-    if (customerClosedMatch) {
-      return {
-        status: 'fechado',
-        reason: `Cliente confirmou: "${customerClosedMatch}"`
-      };
-    }
-  }
-
-  /*
-  Nenhuma frase especial encontrada.
-  */
-
-  return {
-    status: null,
-    reason: 'Nenhuma regra especial identificada'
-  };
-}
-
-/*
-=====================================================
-REGISTRA ALTERAÇÃO AUTOMÁTICA
-=====================================================
-*/
-
-async function registerStatusActivity({
-  tenantId,
-  leadId,
-  oldStatus,
-  newStatus,
-  direction,
-  reason,
-  message
-}) {
-  if (!newStatus || oldStatus === newStatus) {
-    return;
-  }
-
-  const description =
-    `Status alterado automaticamente de "${oldStatus}" para "${newStatus}"`;
-
-  /*
-  Evita atividade duplicada caso a mesma mensagem seja
-  processada pelo envio do CRM e também pelo webhook.
-  */
-
-  await db.query(
-    `
-    INSERT INTO lead_activities (
-      tenant_id,
-      lead_id,
-      user_id,
-      type,
-      description,
-      metadata
-    )
-    SELECT
-      $1,
-      $2,
-      NULL,
-      'status_change',
-      $3,
-      $4
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM lead_activities
-      WHERE tenant_id = $1
-      AND lead_id = $2
-      AND type = 'status_change'
-      AND description = $3
-      AND created_at >=
-        NOW() - INTERVAL '20 seconds'
-    )
-    `,
-    [
-      tenantId,
-      leadId,
-      description,
-      JSON.stringify({
-        from: oldStatus,
-        to: newStatus,
-        source: 'whatsapp_webhook_rule',
-        direction,
-        reason,
-        message
-      })
-    ]
-  );
-}
-
-/*
-=====================================================
-SALVA MENSAGEM SEM DUPLICAR
+SALVA A MENSAGEM SEM DUPLICAR
 =====================================================
 */
 
@@ -370,30 +65,161 @@ async function saveMessage({
 
 /*
 =====================================================
-WEBHOOK DA EVOLUTION
+MOVIMENTAÇÃO PADRÃO QUANDO NÃO EXISTE REGRA
+=====================================================
+*/
+
+async function applyDefaultMovement({
+  tenantId,
+  leadId,
+  currentStatus,
+  direction
+}) {
+  let newStatus =
+    currentStatus;
+
+  /*
+  Mensagem enviada pela equipe:
+  fica aguardando a resposta do cliente.
+  */
+
+  if (direction === 'outbound') {
+    newStatus =
+      'aguardando';
+  }
+
+  /*
+  Mensagem recebida do cliente:
+  volta para atendimento apenas quando estava
+  aguardando, novo, inativo ou sumido.
+
+  Não remove automaticamente clientes de:
+  - horário marcado;
+  - serviço realizado;
+  - cliente recorrente.
+  */
+
+  if (
+    direction === 'inbound' &&
+    [
+      'novo',
+      'aguardando',
+      'inativo',
+      'sumido'
+    ].includes(currentStatus)
+  ) {
+    newStatus =
+      'atendendo';
+  }
+
+  await db.query(
+    `
+    UPDATE leads
+    SET
+      status = $1::lead_status,
+      last_contact_at = NOW(),
+      updated_at = NOW()
+    WHERE id = $2
+    AND tenant_id = $3
+    `,
+    [
+      newStatus,
+      leadId,
+      tenantId
+    ]
+  );
+
+  return newStatus;
+}
+
+/*
+=====================================================
+ATUALIZA SOMENTE O ÚLTIMO CONTATO
+=====================================================
+*/
+
+async function updateLastContact({
+  tenantId,
+  leadId
+}) {
+  await db.query(
+    `
+    UPDATE leads
+    SET
+      last_contact_at = NOW(),
+      updated_at = NOW()
+    WHERE id = $1
+    AND tenant_id = $2
+    `,
+    [
+      leadId,
+      tenantId
+    ]
+  );
+}
+
+/*
+=====================================================
+WEBHOOK DA EVOLUTION API
 =====================================================
 */
 
 router.post('/webhook', async (req, res) => {
   try {
-    const event = req.body.event;
-    const data = req.body.data;
+    const event =
+      req.body.event;
+
+    const data =
+      req.body.data;
+
+    /*
+    Aceita somente eventos de mensagem.
+    */
 
     if (
       event !== 'messages.upsert' ||
       !data
     ) {
       return res.status(200).json({
-        ignored: true
+        ignored: true,
+        reason:
+          'Evento não utilizado'
       });
     }
 
+    const key =
+      data.key || {};
+
     /*
-    Ignora mensagens de grupos.
+    =====================================================
+    IDENTIFICA O CONTATO
+    =====================================================
     */
 
+    const jidCandidates = [
+      key.remoteJidAlt,
+      key.participantAlt,
+      data.remoteJidAlt,
+      data.senderPn,
+      key.remoteJid,
+      key.participant
+    ].filter(Boolean);
+
+    const phoneJid =
+      jidCandidates.find(jid =>
+        String(jid).endsWith(
+          '@s.whatsapp.net'
+        )
+      );
+
     const remoteJid =
-      data.key?.remoteJid || '';
+      phoneJid ||
+      key.remoteJid ||
+      '';
+
+    /*
+    Ignora grupos e status do WhatsApp.
+    */
 
     if (
       remoteJid.endsWith('@g.us') ||
@@ -401,46 +227,107 @@ router.post('/webhook', async (req, res) => {
     ) {
       return res.status(200).json({
         ignored: true,
-        reason: 'Grupo ou status'
+        reason:
+          'Grupo ou status do WhatsApp'
+      });
+    }
+
+    /*
+    Quando a Evolution envia apenas @lid,
+    tentamos usar os campos alternativos.
+
+    Não usamos o número do LID como telefone real.
+    */
+
+    if (
+      !phoneJid &&
+      String(remoteJid).endsWith('@lid')
+    ) {
+      console.log(
+        '⚠️ Mensagem recebida somente com @lid:',
+        {
+          remoteJid:
+            key.remoteJid,
+
+          remoteJidAlt:
+            key.remoteJidAlt,
+
+          participant:
+            key.participant,
+
+          participantAlt:
+            key.participantAlt,
+
+          senderPn:
+            data.senderPn,
+
+          fromMe:
+            key.fromMe
+        }
+      );
+
+      return res.status(200).json({
+        ignored: true,
+        reason:
+          'Telefone verdadeiro não enviado pela Evolution'
       });
     }
 
     let phone =
-      remoteJid
-        .replace('@s.whatsapp.net', '')
-        .replace('@lid', '')
+      String(remoteJid)
+        .split('@')[0]
         .replace(/\D/g, '');
 
     if (!phone) {
       return res.status(200).json({
         ignored: true,
-        reason: 'Telefone não encontrado'
+        reason:
+          'Telefone não encontrado'
       });
     }
 
     if (!phone.startsWith('55')) {
-      phone = `55${phone}`;
+      phone =
+        `55${phone}`;
     }
 
-    const name =
-      data.pushName ||
-      phone;
+    /*
+    =====================================================
+    IDENTIFICA A MENSAGEM
+    =====================================================
+    */
 
     const message =
       data.message?.conversation ||
-      data.message?.extendedTextMessage?.text ||
-      data.message?.imageMessage?.caption ||
-      data.message?.videoMessage?.caption ||
-      data.message?.documentMessage?.caption ||
+      data.message
+        ?.extendedTextMessage?.text ||
+      data.message
+        ?.imageMessage?.caption ||
+      data.message
+        ?.videoMessage?.caption ||
+      data.message
+        ?.documentMessage?.caption ||
       '';
 
+    const cleanMessage =
+      String(message || '').trim();
+
     const fromMe =
-      data.key?.fromMe === true;
+      key.fromMe === true;
 
     const direction =
       fromMe
         ? 'outbound'
         : 'inbound';
+
+    const eventType =
+      fromMe
+        ? 'outbound_message'
+        : 'inbound_message';
+
+    const name =
+      data.pushName ||
+      phone;
 
     /*
     =====================================================
@@ -453,9 +340,9 @@ router.post('/webhook', async (req, res) => {
         `
         SELECT
           id,
-          status,
           name,
-          phone
+          phone,
+          status
         FROM leads
         WHERE tenant_id = $1
         AND phone = $2
@@ -467,12 +354,18 @@ router.post('/webhook', async (req, res) => {
         ]
       );
 
-    let leadId = null;
-    let previousStatus = null;
+    let leadId =
+      null;
+
+    let currentStatus =
+      null;
+
+    let isNewLead =
+      false;
 
     /*
     =====================================================
-    NOVO CONTATO
+    NOVO LEAD
     =====================================================
     */
 
@@ -480,27 +373,17 @@ router.post('/webhook', async (req, res) => {
       existingLead.rows.length === 0
     ) {
       /*
-      Uma mensagem enviada pela própria equipe para um
-      número ainda não cadastrado não cria lead neste momento.
+      Mensagem enviada pela equipe para um número
+      ainda não cadastrado não cria lead automaticamente.
       */
 
       if (fromMe) {
         return res.status(200).json({
           ignored: true,
           reason:
-            'Mensagem enviada para número ainda não cadastrado'
+            'Mensagem enviada para número não cadastrado'
         });
       }
-
-      const classification =
-        detectStatusFromMessage(
-          message,
-          'inbound'
-        );
-
-      const initialStatus =
-        classification.status ||
-        'novo';
 
       const newLead =
         await db.query(
@@ -520,9 +403,9 @@ router.post('/webhook', async (req, res) => {
             $1,
             $2,
             $3,
-            $4,
+            'novo'::lead_status,
             'WhatsApp',
-            $5,
+            $4,
             NOW(),
             NOW(),
             NOW()
@@ -535,26 +418,28 @@ router.post('/webhook', async (req, res) => {
             DEFAULT_TENANT_ID,
             name,
             phone,
-            initialStatus,
-            message || null
+            cleanMessage || null
           ]
         );
 
       leadId =
         newLead.rows[0].id;
 
-      previousStatus =
-        'novo';
+      currentStatus =
+        newLead.rows[0].status;
+
+      isNewLead =
+        true;
 
       console.log(
-        `✅ Novo lead criado automaticamente: ${name} | ${phone}`
+        `✅ Novo lead criado: ${name} | ${phone}`
       );
 
     } else {
       leadId =
         existingLead.rows[0].id;
 
-      previousStatus =
+      currentStatus =
         existingLead.rows[0].status;
     }
 
@@ -565,160 +450,182 @@ router.post('/webhook', async (req, res) => {
     */
 
     await saveMessage({
-      tenantId: DEFAULT_TENANT_ID,
-      leadId,
-      direction,
-      message
-    });
-
-    /*
-    =====================================================
-    IDENTIFICA MOVIMENTAÇÃO
-    =====================================================
-    */
-
-    const classification =
-      detectStatusFromMessage(
-        message,
-        direction
-      );
-
-    let newStatus =
-      classification.status;
-
-    /*
-    Mensagem comum enviada pela equipe:
-    aguarda resposta do cliente.
-    */
-
-    if (
-      fromMe &&
-      !newStatus
-    ) {
-      newStatus =
-        'aguardando';
-
-      classification.reason =
-        'Mensagem enviada pela equipe; aguardando resposta';
-    }
-
-    /*
-    Mensagem comum recebida:
-    movimenta apenas etapas que representam ausência
-    de atendimento. Não tira comprado, fechado ou
-    assinante das etapas automaticamente.
-    */
-
-    if (
-      !fromMe &&
-      !newStatus
-    ) {
-      if (
-        [
-          'novo',
-          'aguardando',
-          'inativo',
-          'sumido'
-        ].includes(previousStatus)
-      ) {
-        newStatus =
-          'atendendo';
-
-        classification.reason =
-          'Cliente respondeu novamente';
-      } else {
-        newStatus =
-          previousStatus;
-
-        classification.reason =
-          'Status atual preservado';
-      }
-    }
-
-    /*
-    =====================================================
-    ATUALIZA O LEAD
-    =====================================================
-    */
-
-    await db.query(
-      `
-      UPDATE leads
-      SET
-       status = $1::lead_status,
-        last_contact_at = NOW(),
-        updated_at = NOW(),
-
-        closed_at =
-          CASE
-           WHEN $1::lead_status = 'fechado'::lead_status
-            THEN COALESCE(
-              closed_at,
-              NOW()
-            )
-            ELSE closed_at
-          END,
-
-        bought_at =
-          CASE
-            WHEN $1::lead_status = 'comprou'::lead_status
-            THEN COALESCE(
-              bought_at,
-              NOW()
-            )
-            ELSE bought_at
-          END
-
-      WHERE id = $2
-      AND tenant_id = $3
-      `,
-      [
-        newStatus,
-        leadId,
-        DEFAULT_TENANT_ID
-      ]
-    );
-
-    await registerStatusActivity({
       tenantId:
         DEFAULT_TENANT_ID,
 
       leadId,
 
-      oldStatus:
-        previousStatus,
-
-      newStatus,
-
       direction,
 
-      reason:
-        classification.reason,
-
-      message
+      message:
+        cleanMessage
     });
+
+    /*
+    =====================================================
+    EXECUTA O MOTOR CENTRAL
+    =====================================================
+    */
+
+    const automation =
+      cleanMessage
+        ? await processMessageAutomation({
+            tenantId:
+              DEFAULT_TENANT_ID,
+
+            leadId,
+
+            userId:
+              null,
+
+            currentStatus,
+
+            eventType,
+
+            message:
+              cleanMessage
+          })
+        : {
+            matched: false,
+            changed: false,
+            newStatus:
+              currentStatus,
+            rule: null,
+            reason:
+              'Mensagem sem texto'
+          };
+
+    let finalStatus =
+      automation.newStatus ||
+      currentStatus;
+
+    /*
+    =====================================================
+    SEM REGRA ENCONTRADA
+    =====================================================
+    */
+
+    if (!automation.matched) {
+      /*
+      Novo contato continua como Novo Lead.
+
+      A primeira mensagem não precisa mover imediatamente
+      para Em atendimento antes que a equipe responda.
+      */
+
+      if (
+        isNewLead &&
+        direction === 'inbound'
+      ) {
+        finalStatus =
+          currentStatus;
+
+        await updateLastContact({
+          tenantId:
+            DEFAULT_TENANT_ID,
+
+          leadId
+        });
+
+      } else {
+        finalStatus =
+          await applyDefaultMovement({
+            tenantId:
+              DEFAULT_TENANT_ID,
+
+            leadId,
+
+            currentStatus,
+
+            direction
+          });
+      }
+    }
+
+    /*
+    Se a automação encontrou uma regra, mas o lead já
+    estava na etapa correta, atualizamos o último contato.
+    */
+
+    if (automation.matched) {
+      await updateLastContact({
+        tenantId:
+          DEFAULT_TENANT_ID,
+
+        leadId
+      });
+    }
 
     console.log(
       `${fromMe ? '📤' : '📥'} ${phone} | ` +
-      `${previousStatus} → ${newStatus} | ` +
-      classification.reason
+      `${currentStatus} → ${finalStatus}`
+    );
+
+    console.log(
+      '🤖 Resultado do motor:',
+      {
+        event:
+          eventType,
+
+        matched:
+          automation.matched,
+
+        changed:
+          automation.changed,
+
+        rule:
+          automation.rule?.name ||
+          null,
+
+        reason:
+          automation.reason
+      }
     );
 
     return res.status(200).json({
       success: true,
-      lead_id: leadId,
+
+      lead_id:
+        leadId,
+
       direction,
+
+      event_type:
+        eventType,
+
       previous_status:
-        previousStatus,
+        currentStatus,
+
       new_status:
-        newStatus,
-      reason:
-        classification.reason
+        finalStatus,
+
+      automation: {
+        matched:
+          automation.matched,
+
+        changed:
+          automation.changed,
+
+        rule_id:
+          automation.rule?.id ||
+          null,
+
+        rule_name:
+          automation.rule?.name ||
+          null,
+
+        matched_keyword:
+          automation.matchedKeyword ||
+          null,
+
+        reason:
+          automation.reason
+      }
     });
 
   } catch (error) {
     console.error(
-      'Erro webhook Evolution:',
+      '❌ Erro webhook Evolution:',
       error
     );
 
