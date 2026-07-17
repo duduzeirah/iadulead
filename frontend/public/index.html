@@ -678,7 +678,10 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
             <h2>🤖 Automações</h2>
             <p>Crie regras para organizar os atendimentos automaticamente</p>
           </div>
-          <button class="btn btn-brand btn-sm" onclick="openAutomationModal()">+ Nova automação</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="openAutomationTestModal()">🧪 Testar automação</button>
+            <button class="btn btn-brand btn-sm" onclick="openAutomationModal()">+ Nova automação</button>
+          </div>
         </div>
 
         <div class="alert brand">
@@ -913,6 +916,40 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeM('m-automation')">Cancelar</button>
       <button class="btn btn-brand" id="auto-save-btn" onclick="saveAutomation()">Salvar automação</button>
+    </div>
+  </div>
+</div>
+
+
+<div class="modal-bg" id="m-automation-test">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeM('m-automation-test')">✕</button>
+    <div class="modal-title">🧪 Testar automação</div>
+
+    <div class="alert brand">
+      <div class="alert-icon">ℹ️</div>
+      <div>Este teste não envia mensagem e não altera nenhum cliente.</div>
+    </div>
+
+    <div class="form-group">
+      <label>Quem enviou a mensagem?</label>
+      <select id="auto-test-event">
+        <option value="outbound_message">Equipe / empresa</option>
+        <option value="inbound_message">Cliente</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>Mensagem para testar</label>
+      <textarea id="auto-test-message" class="auto-textarea" placeholder="Ex: pagamento confirmado e serviço concluído"></textarea>
+    </div>
+
+    <div id="auto-test-error" class="form-err"></div>
+    <div id="auto-test-result" class="auto-test-result"></div>
+
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeM('m-automation-test')">Fechar</button>
+      <button class="btn btn-brand" id="auto-test-btn" onclick="testAutomationMessage()">Executar teste</button>
     </div>
   </div>
 </div>
@@ -1558,6 +1595,67 @@ function deleteAutomation(id){
       toast(e.message||'Erro ao excluir automação','err');
     }
   });
+}
+
+
+function openAutomationTestModal(){
+  $('auto-test-event').value='outbound_message';
+  $('auto-test-message').value='';
+  $('auto-test-error').textContent='';
+  const result=$('auto-test-result');
+  result.style.display='none';
+  result.innerHTML='';
+  openM('m-automation-test');
+  setTimeout(()=>$('auto-test-message')?.focus(),100);
+}
+
+async function testAutomationMessage(){
+  const button=$('auto-test-btn');
+  const error=$('auto-test-error');
+  const result=$('auto-test-result');
+  const eventType=$('auto-test-event').value;
+  const message=$('auto-test-message').value.trim();
+
+  error.textContent='';
+  result.style.display='none';
+  result.innerHTML='';
+
+  if(!message){
+    error.textContent='Digite uma mensagem para testar.';
+    return;
+  }
+
+  setBtnLoading(button,true);
+
+  try{
+    const response=await api('POST','/automations/test/message',{
+      event_type:eventType,
+      message
+    });
+
+    result.style.display='block';
+
+    if(!response.matched){
+      result.innerHTML=`
+        <div style="font-weight:700;color:var(--danger);margin-bottom:5px">❌ Nenhuma automação encontrada</div>
+        <div>${esc(response.reason||'Nenhuma regra reconheceu essa mensagem.')}</div>
+      `;
+      return;
+    }
+
+    result.innerHTML=`
+      <div style="font-weight:700;color:var(--brand);margin-bottom:8px">✅ Automação encontrada</div>
+      <div class="dr"><span>Regra</span><span>${esc(response.rule?.name||'—')}</span></div>
+      <div class="dr"><span>Frase reconhecida</span><span>${esc(response.matched_keyword||'—')}</span></div>
+      <div class="dr"><span>Destino</span><span>${esc(statusLabel(response.rule?.action_status)||'—')}</span></div>
+      <div class="dr"><span>Prioridade</span><span>${Number(response.rule?.priority)||100}</span></div>
+      <div style="font-size:11px;color:var(--t3);margin-top:8px">${esc(response.reason||'')}</div>
+    `;
+  }catch(e){
+    error.textContent=e.message||'Erro ao testar automação';
+  }finally{
+    setBtnLoading(button,false);
+  }
 }
 
 // ============================================================
