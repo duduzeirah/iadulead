@@ -3,6 +3,10 @@ const axios = require('axios');
 const db = require('../db');
 const { auth } = require('../middleware/auth');
 
+const {
+  processMessageAutomation
+} = require('../services/automationEngine');
+
 const router = express.Router();
 
 router.use(auth);
@@ -24,163 +28,8 @@ const EVOLUTION_API_KEY =
 
 /*
 =====================================================
-NORMALIZA TEXTO
-=====================================================
-*/
-
-function normalizeText(text = '') {
-  return String(text)
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/*
-=====================================================
-RECONHECE O STATUS PELA MENSAGEM
-=====================================================
-*/
-
-function detectStatusFromMessage(message) {
-  const text = normalizeText(message);
-
-  /*
-  Frases negativas evitam mudar o cliente por engano.
-
-  Exemplos:
-  - ainda não está confirmado
-  - não confirmou
-  - pagamento não confirmado
-  */
-
-  const negativePatterns = [
-    'nao confirmado',
-    'nao esta confirmado',
-    'ainda nao confirmado',
-    'ainda nao esta confirmado',
-    'nao confirmou',
-    'nao foi confirmado',
-    'pagamento nao confirmado',
-    'pagamento ainda nao confirmado',
-    'pix nao caiu',
-    'pix ainda nao caiu',
-    'nao foi pago',
-    'ainda nao foi pago',
-    'servico nao concluido',
-    'servico ainda nao concluido'
-  ];
-
-  const hasNegativePattern =
-    negativePatterns.some(pattern =>
-      text.includes(pattern)
-    );
-
-  if (hasNegativePattern) {
-    return {
-      status: 'aguardando',
-      reason:
-        'Mensagem possui indicação de pendência ou negativa'
-    };
-  }
-
-  /*
-  COMPRA / SERVIÇO REALIZADO
-
-  Tem prioridade sobre "fechado".
-  */
-
-  const boughtPatterns = [
-    'pagamento confirmado',
-    'pix confirmado',
-    'pix recebido',
-    'pagamento recebido',
-    'pagamento aprovado',
-    'pedido pago',
-    'compra finalizada',
-    'compra concluida',
-    'venda finalizada',
-    'venda concluida',
-    'servico realizado',
-    'servico concluido',
-    'procedimento realizado',
-    'procedimento concluido',
-    'atendimento concluido',
-    'atendimento finalizado',
-    'parabens pela compra',
-    'obrigado pela compra',
-    'produto entregue',
-    'pedido entregue'
-  ];
-
-  const boughtMatch =
-    boughtPatterns.find(pattern =>
-      text.includes(pattern)
-    );
-
-  if (boughtMatch) {
-    return {
-      status: 'comprou',
-      reason:
-        `Frase reconhecida: "${boughtMatch}"`
-    };
-  }
-
-  /*
-  FECHADO / HORÁRIO MARCADO
-  */
-
-  const closedPatterns = [
-    'agendamento confirmado',
-    'horario confirmado',
-    'horario marcado',
-    'ficou marcado',
-    'esta agendado',
-    'esta agendada',
-    'agendado para',
-    'agendada para',
-    'confirmado para',
-    'confirmada para',
-    'pode vir',
-    'pode comparecer',
-    'te esperamos',
-    'esperamos voce',
-    'combinado para',
-    'fechado para',
-    'reserva confirmada',
-    'visita confirmada'
-  ];
-
-  const closedMatch =
-    closedPatterns.find(pattern =>
-      text.includes(pattern)
-    );
-
-  if (closedMatch) {
-    return {
-      status: 'fechado',
-      reason:
-        `Frase reconhecida: "${closedMatch}"`
-    };
-  }
-
-  /*
-  Nenhuma regra encontrada:
-  mensagem enviada normalmente fica aguardando resposta.
-  */
-
-  return {
-    status: 'aguardando',
-    reason:
-      'Mensagem enviada; aguardando resposta'
-  };
-}
-
-/*
-=====================================================
 POST /api/sendmessage
-ENVIA E SALVA A MENSAGEM NO CRM
+ENVIA, SALVA E EXECUTA AUTOMAÇÕES
 =====================================================
 */
 
@@ -197,8 +46,7 @@ router.post('/', async (req, res) => {
     if (!lead_id) {
       return res.status(400).json({
         success: false,
-        error:
-          'Lead não informado'
+        error: 'Lead não informado'
       });
     }
 
@@ -208,8 +56,7 @@ router.post('/', async (req, res) => {
     if (!cleanMessage) {
       return res.status(400).json({
         success: false,
-        error:
-          'Mensagem não pode ser vazia'
+        error: 'Mensagem não pode ser vazia'
       });
     }
 
@@ -243,8 +90,7 @@ router.post('/', async (req, res) => {
     ) {
       return res.status(404).json({
         success: false,
-        error:
-          'Lead não encontrado'
+        error: 'Lead não encontrado'
       });
     }
 
@@ -264,8 +110,7 @@ router.post('/', async (req, res) => {
     if (!phone) {
       return res.status(400).json({
         success: false,
-        error:
-          'Lead sem telefone válido'
+        error: 'Lead sem telefone válido'
       });
     }
 
@@ -295,7 +140,7 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    ENVIA A MENSAGEM PARA O WHATSAPP
+    ENVIA PARA O WHATSAPP
     =====================================================
     */
 
@@ -322,7 +167,7 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    SALVA A MENSAGEM NO HISTÓRICO
+    SALVA A MENSAGEM SEM DUPLICAR
     =====================================================
     */
 
@@ -363,113 +208,79 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    IDENTIFICA O NOVO STATUS
+    EXECUTA O MOTOR CENTRAL DE AUTOMAÇÕES
     =====================================================
     */
 
-    const classification =
-      detectStatusFromMessage(
-        cleanMessage
-      );
-
-    const newStatus =
-      classification.status;
-
-    /*
-    =====================================================
-    ATUALIZA O LEAD
-    =====================================================
-    */
-
-  await db.query(
-  `
-  UPDATE leads
-  SET
-    status = $1::lead_status,
-    last_contact_at = NOW(),
-    updated_at = NOW(),
-
-    closed_at =
-      CASE
-        WHEN $1::lead_status = 'fechado'::lead_status
-        THEN COALESCE(
-          closed_at,
-          NOW()
-        )
-        ELSE closed_at
-      END,
-
-    bought_at =
-      CASE
-        WHEN $1::lead_status = 'comprou'::lead_status
-        THEN COALESCE(
-          bought_at,
-          NOW()
-        )
-        ELSE bought_at
-      END
-
-  WHERE id = $2
-  AND tenant_id = $3
-  `,
-  [
-    newStatus,
-    lead_id,
-    tenantId
-  ]
-);
-
-    /*
-    =====================================================
-    REGISTRA A MUDANÇA NO HISTÓRICO
-    =====================================================
-    */
-
-    if (
-      newStatus !== lead.status
-    ) {
-      await db.query(
-        `
-        INSERT INTO lead_activities (
-          tenant_id,
+    const automation =
+      await processMessageAutomation({
+        tenantId,
+        leadId:
           lead_id,
-          user_id,
-          type,
-          description,
-          metadata
-        )
-        VALUES (
-          $1,
-          $2,
-          $3,
-          'status_change',
-          $4,
-          $5
-        )
-        `,
-        [
-          tenantId,
-          lead_id,
+
+        userId:
           req.user.id,
 
-          `Status alterado automaticamente de "${lead.status}" para "${newStatus}"`,
+        currentStatus:
+          lead.status,
 
-          JSON.stringify({
-            from:
-              lead.status,
+        eventType:
+          'outbound_message',
 
-            to:
-              newStatus,
+        message:
+          cleanMessage
+      });
 
-            source:
-              'message_rule',
+    /*
+    =====================================================
+    SEM REGRA ENCONTRADA:
+    MOVE NORMALMENTE PARA AGUARDANDO
+    =====================================================
+    */
 
-            reason:
-              classification.reason,
+    let finalStatus =
+      automation.newStatus ||
+      lead.status;
 
-            message:
-              cleanMessage
-          })
+    if (!automation.matched) {
+      await db.query(
+        `
+        UPDATE leads
+        SET
+          status = 'aguardando'::lead_status,
+          last_contact_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+        AND tenant_id = $2
+        `,
+        [
+          lead_id,
+          tenantId
+        ]
+      );
+
+      finalStatus =
+        'aguardando';
+    }
+
+    /*
+    Mesmo quando a regra encontrou a mesma etapa,
+    atualizamos o horário do contato.
+    */
+
+    if (automation.matched) {
+      await db.query(
+        `
+        UPDATE leads
+        SET
+          last_contact_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+        AND tenant_id = $2
+        `,
+        [
+          lead_id,
+          tenantId
         ]
       );
     }
@@ -479,28 +290,62 @@ router.post('/', async (req, res) => {
     );
 
     console.log(
-      `🤖 Status identificado: ${newStatus} — ${classification.reason}`
+      `🤖 Resultado da automação:`,
+      {
+        matched:
+          automation.matched,
+
+        changed:
+          automation.changed,
+
+        previous_status:
+          lead.status,
+
+        final_status:
+          finalStatus,
+
+        rule:
+          automation.rule?.name || null,
+
+        reason:
+          automation.reason
+      }
     );
 
     return res.status(200).json({
       success: true,
+
       lead_id,
+
       phone,
+
       message:
         cleanMessage,
 
       automation: {
+        matched:
+          automation.matched,
+
+        changed:
+          automation.changed,
+
         previous_status:
           lead.status,
 
         new_status:
-          newStatus,
+          finalStatus,
 
-        changed:
-          newStatus !== lead.status,
+        rule_id:
+          automation.rule?.id || null,
+
+        rule_name:
+          automation.rule?.name || null,
+
+        matched_keyword:
+          automation.matchedKeyword || null,
 
         reason:
-          classification.reason
+          automation.reason
       },
 
       evolution:
@@ -528,6 +373,7 @@ router.post('/', async (req, res) => {
           error.message,
 
         status,
+
         details
       }
     );
