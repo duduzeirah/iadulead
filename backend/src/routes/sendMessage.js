@@ -381,43 +381,43 @@ router.post('/', async (req, res) => {
     =====================================================
     */
 
-    await db.query(
-      `
-      UPDATE leads
-      SET
-        status = $1,
-        last_contact_at = NOW(),
-        updated_at = NOW(),
+  await db.query(
+  `
+  UPDATE leads
+  SET
+    status = $1::lead_status,
+    last_contact_at = NOW(),
+    updated_at = NOW(),
 
-        closed_at =
-          CASE
-            WHEN $1 = 'fechado'
-            THEN COALESCE(
-              closed_at,
-              NOW()
-            )
-            ELSE closed_at
-          END,
+    closed_at =
+      CASE
+        WHEN $1::lead_status = 'fechado'::lead_status
+        THEN COALESCE(
+          closed_at,
+          NOW()
+        )
+        ELSE closed_at
+      END,
 
-        bought_at =
-          CASE
-            WHEN $1 = 'comprou'
-            THEN COALESCE(
-              bought_at,
-              NOW()
-            )
-            ELSE bought_at
-          END
+    bought_at =
+      CASE
+        WHEN $1::lead_status = 'comprou'::lead_status
+        THEN COALESCE(
+          bought_at,
+          NOW()
+        )
+        ELSE bought_at
+      END
 
-      WHERE id = $2
-      AND tenant_id = $3
-      `,
-      [
-        newStatus,
-        lead_id,
-        tenantId
-      ]
-    );
+  WHERE id = $2
+  AND tenant_id = $3
+  `,
+  [
+    newStatus,
+    lead_id,
+    tenantId
+  ]
+);
 
     /*
     =====================================================
