@@ -484,8 +484,42 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 }
 @media(max-width:500px){
   .page-inner{padding:14px 14px}.auth-box{padding:22px 18px}
-  .stats-grid{grid-template-columns:1fr 1fr}.topbar-right .search-wrap{display:none}
+  .stats-grid{grid-template-columns:1fr 1fr}
   .modal-box{padding:20px 16px}
+
+  #topbar{
+    height:auto;
+    min-height:54px;
+    padding:8px 10px;
+    flex-wrap:wrap;
+  }
+
+  .topbar-title{
+    flex:1;
+  }
+
+  .topbar-right{
+    width:100%;
+    margin-left:0;
+    display:grid;
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:8px;
+  }
+
+  .topbar-right .search-wrap{
+    display:flex;
+    width:100%;
+    min-width:0;
+  }
+
+  .topbar-right .btn{
+    padding-left:12px;
+    padding-right:12px;
+  }
+
+  .search-results{
+    top:106px;
+  }
 }
 </style>
 </head>
