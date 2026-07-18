@@ -199,6 +199,26 @@ async function runMigration() {
     )
   `);
 
+  // ── TABELA: WHATSAPP_CONNECTIONS ──────────────────────────
+  await query(`
+    CREATE TABLE IF NOT EXISTS whatsapp_connections (
+      id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+      tenant_id       UUID NOT NULL UNIQUE REFERENCES tenants(id) ON DELETE CASCADE,
+      provider        VARCHAR(30) NOT NULL DEFAULT 'evolution',
+      instance_name   VARCHAR(150) UNIQUE,
+      status          VARCHAR(30) NOT NULL DEFAULT 'disconnected',
+      phone_number    VARCHAR(50),
+      connected_at    TIMESTAMPTZ,
+      access_token    TEXT,
+      phone_number_id VARCHAR(150),
+      waba_id         VARCHAR(150),
+      last_error      TEXT,
+      metadata        JSONB NOT NULL DEFAULT '{}',
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
   // ── ÍNDICES ───────────────────────────────────────────────
   await query(`CREATE INDEX IF NOT EXISTS idx_leads_tenant    ON leads(tenant_id)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_leads_status    ON leads(status)`);
@@ -211,6 +231,7 @@ async function runMigration() {
   await query(`CREATE INDEX IF NOT EXISTS idx_reminders_due   ON reminders(due_date)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email)`);
   await query(`CREATE INDEX IF NOT EXISTS idx_users_tenant    ON users(tenant_id)`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_whatsapp_instance ON whatsapp_connections(instance_name)`);
 
   // ── FUNÇÃO: updated_at automático ─────────────────────────
   await query(`
@@ -219,7 +240,7 @@ async function runMigration() {
     BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
     $$ LANGUAGE plpgsql
   `);
-  for (const t of ['tenants','users','leads','message_templates']) {
+  for (const t of ['tenants','users','leads','message_templates','whatsapp_connections']) {
     await query(`
       DROP TRIGGER IF EXISTS trg_${t}_updated ON ${t};
       CREATE TRIGGER trg_${t}_updated
