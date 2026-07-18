@@ -1,5 +1,7 @@
 const express = require('express');
 const db = require('../db');
+const { auth } = require('../middleware/auth');
+const { evolutionRequest, publicBackendUrl, safeInstanceName, extractQr, extractState } = require('../services/evolutionService');
 
 const {
   processMessageAutomation
@@ -7,8 +9,179 @@ const {
 
 const router = express.Router();
 
-const DEFAULT_TENANT_ID =
-  '31bc576d-0b27-4ea9-8a81-769429dde7ed';
+
+/*
+=====================================================
+CONEXÃO EVOLUTION MULTIEMPRESA
+=====================================================
+*/
+
+async function getTenantConnection(tenantId, { bootstrap = true } = {}) {
+  let result = await db.query(
+    `SELECT * FROM whatsapp_connections WHERE tenant_id = $1 LIMIT 1`,
+    [tenantId]
+  );
+
+  if (result.rows[0] || !bootstrap) return result.rows[0] || null;
+
+  // Preserva a instância antiga para a primeira empresa já existente.
+  const legacyInstance = String(process.env.EVOLUTION_INSTANCE || '').trim();
+  let instanceName = safeInstanceName(tenantId);
+
+  if (legacyInstance) {
+    const used = await db.query(
+      `SELECT tenant_id FROM whatsapp_connections WHERE instance_name = $1 LIMIT 1`,
+      [legacyInstance]
+    );
+    if (!used.rows.length) instanceName = legacyInstance;
+  }
+
+  result = await db.query(
+    `INSERT INTO whatsapp_connections (
+       tenant_id, provider, instance_name, status, created_at, updated_at
+     ) VALUES ($1, 'evolution', $2, 'disconnected', NOW(), NOW())
+     ON CONFLICT (tenant_id) DO UPDATE SET updated_at = NOW()
+     RETURNING *`,
+    [tenantId, instanceName]
+  );
+
+  return result.rows[0];
+}
+
+async function getConnectionByInstance(instanceName) {
+  if (!instanceName) return null;
+  const result = await db.query(
+    `SELECT * FROM whatsapp_connections WHERE instance_name = $1 LIMIT 1`,
+    [String(instanceName)]
+  );
+  return result.rows[0] || null;
+}
+
+async function updateConnection(tenantId, values = {}) {
+  const result = await db.query(
+    `UPDATE whatsapp_connections SET
+       status = COALESCE($2, status),
+       phone_number = COALESCE($3, phone_number),
+       connected_at = CASE WHEN $2 = 'connected' THEN COALESCE(connected_at, NOW()) ELSE connected_at END,
+       last_error = $4,
+       metadata = COALESCE($5::jsonb, metadata),
+       updated_at = NOW()
+     WHERE tenant_id = $1
+     RETURNING *`,
+    [tenantId, values.status || null, values.phoneNumber || null, values.lastError || null, values.metadata ? JSON.stringify(values.metadata) : null]
+  );
+  return result.rows[0] || null;
+}
+
+router.get('/status', auth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const connection = await getTenantConnection(tenantId);
+    let state = connection.status || 'disconnected';
+
+    try {
+      const response = await evolutionRequest('get', `/instance/connectionState/${encodeURIComponent(connection.instance_name)}`);
+      const rawState = extractState(response.data);
+      state = ['open', 'connected'].includes(String(rawState).toLowerCase()) ? 'connected' :
+        ['connecting'].includes(String(rawState).toLowerCase()) ? 'connecting' : 'disconnected';
+      await updateConnection(tenantId, { status: state, metadata: response.data });
+    } catch (error) {
+      // Uma instância ainda não criada deve aparecer apenas como desconectada.
+      if (![400, 404].includes(error.response?.status)) throw error;
+      state = 'disconnected';
+    }
+
+    return res.json({
+      provider: connection.provider,
+      instance_name: connection.instance_name,
+      status: state,
+      phone_number: connection.phone_number,
+      connected_at: connection.connected_at,
+      meta_available: Boolean(process.env.META_APP_ID && process.env.META_CONFIG_ID)
+    });
+  } catch (error) {
+    console.error('Erro ao consultar conexão WhatsApp:', error.response?.data || error);
+    return res.status(500).json({ error: error.message || 'Erro ao consultar conexão' });
+  }
+});
+
+router.post('/evolution/connect', auth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const connection = await getTenantConnection(tenantId);
+    const instanceName = connection.instance_name;
+
+    try {
+      await evolutionRequest('post', '/instance/create', {
+        instanceName,
+        integration: 'WHATSAPP-BAILEYS',
+        qrcode: true
+      });
+    } catch (error) {
+      // Se a instância já existe, seguimos para gerar/consultar o QR.
+      if (![400, 403, 409].includes(error.response?.status)) throw error;
+    }
+
+    try {
+      await evolutionRequest('post', `/webhook/set/${encodeURIComponent(instanceName)}`, {
+        webhook: {
+          enabled: true,
+          url: `${publicBackendUrl()}/api/whatsapp/webhook`,
+          webhookByEvents: false,
+          webhookBase64: false,
+          events: ['MESSAGES_UPSERT', 'CONNECTION_UPDATE', 'QRCODE_UPDATED']
+        }
+      });
+    } catch (error) {
+      console.warn('Não foi possível atualizar webhook:', error.response?.data || error.message);
+    }
+
+    const qrResponse = await evolutionRequest('get', `/instance/connect/${encodeURIComponent(instanceName)}`);
+    const qr = extractQr(qrResponse.data);
+
+    await updateConnection(tenantId, { status: 'connecting', metadata: qrResponse.data });
+
+    return res.json({
+      success: true,
+      provider: 'evolution',
+      instance_name: instanceName,
+      status: 'connecting',
+      qr_code: qr,
+      raw: qr ? undefined : qrResponse.data
+    });
+  } catch (error) {
+    console.error('Erro ao conectar Evolution:', error.response?.data || error);
+    return res.status(error.response?.status || 500).json({
+      error: error.response?.data?.message || error.message || 'Erro ao gerar QR Code'
+    });
+  }
+});
+
+router.post('/evolution/disconnect', auth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const connection = await getTenantConnection(tenantId, { bootstrap: false });
+    if (!connection) return res.status(404).json({ error: 'Conexão não encontrada' });
+
+    try {
+      await evolutionRequest('delete', `/instance/logout/${encodeURIComponent(connection.instance_name)}`);
+    } catch (error) {
+      if (![400, 404].includes(error.response?.status)) throw error;
+    }
+
+    await updateConnection(tenantId, { status: 'disconnected', metadata: {} });
+    return res.json({ success: true, status: 'disconnected' });
+  } catch (error) {
+    console.error('Erro ao desconectar Evolution:', error.response?.data || error);
+    return res.status(error.response?.status || 500).json({ error: error.message || 'Erro ao desconectar' });
+  }
+});
+
+router.get('/meta/start', auth, async (req, res) => {
+  return res.status(501).json({
+    error: 'A conexão oficial da Meta está preparada na interface, mas depende do cadastro do aplicativo e do Embedded Signup.'
+  });
+});
 
 /*
 =====================================================
@@ -166,11 +339,29 @@ WEBHOOK DA EVOLUTION API
 
 router.post('/webhook', async (req, res) => {
   try {
-    const event =
-      req.body.event;
+    const event = req.body.event;
+    const data = req.body.data;
+    const instanceName = req.body.instance || data?.instance || req.query.instance;
+    const connection = await getConnectionByInstance(instanceName);
 
-    const data =
-      req.body.data;
+    if (!connection) {
+      return res.status(200).json({ ignored: true, reason: 'Instância não vinculada a uma empresa' });
+    }
+
+    const tenantId = connection.tenant_id;
+
+    if (event === 'connection.update') {
+      const rawState = data?.state || data?.status || data?.connectionStatus;
+      const status = ['open', 'connected'].includes(String(rawState).toLowerCase())
+        ? 'connected'
+        : ['connecting'].includes(String(rawState).toLowerCase())
+          ? 'connecting'
+          : 'disconnected';
+
+      const phoneNumber = String(data?.wuid || data?.number || '').split('@')[0].replace(/\D/g, '') || null;
+      await updateConnection(tenantId, { status, phoneNumber, metadata: data || {} });
+      return res.status(200).json({ success: true, status });
+    }
 
     /*
     Aceita somente eventos de mensagem.
@@ -349,7 +540,7 @@ router.post('/webhook', async (req, res) => {
         LIMIT 1
         `,
         [
-          DEFAULT_TENANT_ID,
+          tenantId,
           phone
         ]
       );
@@ -415,7 +606,7 @@ router.post('/webhook', async (req, res) => {
             status
           `,
           [
-            DEFAULT_TENANT_ID,
+            tenantId,
             name,
             phone,
             cleanMessage || null
@@ -451,7 +642,7 @@ router.post('/webhook', async (req, res) => {
 
     await saveMessage({
       tenantId:
-        DEFAULT_TENANT_ID,
+        tenantId,
 
       leadId,
 
@@ -471,7 +662,7 @@ router.post('/webhook', async (req, res) => {
       cleanMessage
         ? await processMessageAutomation({
             tenantId:
-              DEFAULT_TENANT_ID,
+              tenantId,
 
             leadId,
 
@@ -522,7 +713,7 @@ router.post('/webhook', async (req, res) => {
 
         await updateLastContact({
           tenantId:
-            DEFAULT_TENANT_ID,
+            tenantId,
 
           leadId
         });
@@ -531,7 +722,7 @@ router.post('/webhook', async (req, res) => {
         finalStatus =
           await applyDefaultMovement({
             tenantId:
-              DEFAULT_TENANT_ID,
+              tenantId,
 
             leadId,
 
@@ -550,7 +741,7 @@ router.post('/webhook', async (req, res) => {
     if (automation.matched) {
       await updateLastContact({
         tenantId:
-          DEFAULT_TENANT_ID,
+          tenantId,
 
         leadId
       });
