@@ -156,10 +156,24 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg0);color:var(--
 #menu-btn{display:none;background:none;border:none;color:var(--t1);font-size:20px;cursor:pointer;padding:4px}
 .topbar-title{font-family:'Sora',sans-serif;font-size:15px;font-weight:700}
 .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
-.search-wrap{background:var(--bg3);border:1px solid var(--b1);border-radius:var(--r-sm);display:flex;align-items:center;gap:7px;padding:7px 12px;width:210px;transition:all .15s}
+.search-wrap{background:var(--bg3);border:1px solid var(--b1);border-radius:var(--r-sm);display:flex;align-items:center;gap:7px;padding:7px 12px;width:260px;transition:all .15s;position:relative}
 .search-wrap:focus-within{border-color:var(--brand)}
 .search-wrap input{background:none;border:none;color:var(--t1);font-size:13px;width:100%;outline:none;font-family:inherit}
 .search-wrap input::placeholder{color:var(--t3)}
+.search-results{display:none;position:absolute;top:calc(100% + 8px);right:0;width:360px;max-height:420px;overflow-y:auto;background:var(--bg1);border:1px solid var(--b2);border-radius:var(--r);box-shadow:var(--shadow);z-index:1000;padding:7px}
+.search-results.show{display:block}
+.search-result-head{padding:8px 10px;font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;border-bottom:1px solid var(--b1)}
+.search-result-item{display:flex;align-items:center;gap:10px;width:100%;padding:10px;border:none;background:none;color:var(--t1);text-align:left;cursor:pointer;border-radius:8px;font-family:inherit}
+.search-result-item:hover,.search-result-item.active{background:var(--bg3)}
+.search-result-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.search-result-info{min-width:0;flex:1}
+.search-result-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-result-meta{font-size:11px;color:var(--t3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-result-status{font-size:10px;white-space:nowrap}
+.search-result-empty{padding:20px 12px;text-align:center;color:var(--t3);font-size:12px}
+@media(max-width:700px){
+  .search-results{position:fixed;top:58px;left:10px;right:10px;width:auto;max-height:55vh}
+}
 
 #content{margin-left:248px;flex:1;display:flex;flex-direction:column;min-height:100vh}
 .page{display:none}.page.active{display:block}
@@ -608,9 +622,18 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
       <button id="menu-btn" onclick="toggleSb()">☰</button>
       <div class="topbar-title" id="page-title">Dashboard</div>
       <div class="topbar-right">
-        <div class="search-wrap">
+        <div class="search-wrap" id="search-wrap">
           <span style="color:var(--t3);font-size:14px">🔍</span>
-          <input type="text" placeholder="Buscar lead..." id="search-inp" oninput="searchLeads(this.value)">
+          <input
+            type="text"
+            placeholder="Buscar nome, telefone, produto..."
+            id="search-inp"
+            autocomplete="off"
+            oninput="searchLeads(this.value)"
+            onkeydown="handleSearchKey(event)"
+            onfocus="searchLeads(this.value)"
+          >
+          <div class="search-results" id="search-results"></div>
         </div>
         <button class="btn btn-brand btn-sm" onclick="openM('m-lead')">+ Novo Lead</button>
       </div>
@@ -2625,11 +2648,201 @@ function exportCSV(){
   const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv); a.download=`iadulead_leads_${new Date().toISOString().split('T')[0]}.csv`; a.click();
   toast(`${leads.length} leads exportados!`,'ok');
 }
-function searchLeads(q_){
-  if(!q_||q_.length<2) return;
-  const r=leads.filter(l=>l.name.toLowerCase().includes(q_.toLowerCase())||(l.phone||'').includes(q_)||(l.product||'').toLowerCase().includes(q_.toLowerCase()));
-  toast(`${r.length} resultado(s) para "${q_}"`,r.length?'ok':'warn');
+let searchResultsCache=[];
+let searchSelectedIndex=-1;
+
+function normalizeSearchValue(value=''){
+  return String(value)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .trim();
 }
+
+function closeSearchResults(){
+  const box=$('search-results');
+  if(box){
+    box.classList.remove('show');
+    box.innerHTML='';
+  }
+  searchResultsCache=[];
+  searchSelectedIndex=-1;
+}
+
+function searchableLeadText(lead){
+  return normalizeSearchValue([
+    lead.name,
+    lead.phone,
+    lead.product,
+    lead.notes,
+    lead.origin,
+    lead.email,
+    lead.status,
+    statusLabel(lead.status),
+    lead.conversation_topic,
+    lead.commercial_priority,
+    lead.customer_relationship
+  ].filter(Boolean).join(' '));
+}
+
+function searchLeads(value){
+  const box=$('search-results');
+  if(!box) return;
+
+  const query=normalizeSearchValue(value);
+  const digits=String(value||'').replace(/\D/g,'');
+
+  if(query.length<2 && digits.length<2){
+    closeSearchResults();
+    return;
+  }
+
+  searchResultsCache=leads
+    .filter(lead=>{
+      const text=searchableLeadText(lead);
+      const phone=String(lead.phone||'').replace(/\D/g,'');
+
+      return (
+        text.includes(query) ||
+        (digits.length>=2 && phone.includes(digits))
+      );
+    })
+    .slice(0,20);
+
+  searchSelectedIndex=-1;
+
+  if(!searchResultsCache.length){
+    box.innerHTML=`
+      <div class="search-result-empty">
+        Nenhum cliente encontrado para “${esc(value)}”.
+      </div>
+    `;
+    box.classList.add('show');
+    return;
+  }
+
+  box.innerHTML=`
+    <div class="search-result-head">
+      ${searchResultsCache.length} resultado(s) encontrado(s)
+    </div>
+
+    ${searchResultsCache.map((lead,index)=>`
+      <button
+        type="button"
+        class="search-result-item"
+        data-search-index="${index}"
+        onclick="openSearchResult('${lead.id}')"
+      >
+        <div
+          class="search-result-avatar"
+          style="background:${avColor(lead.id)}22;color:${avColor(lead.id)}"
+        >
+          ${ini(lead.name)}
+        </div>
+
+        <div class="search-result-info">
+          <div class="search-result-name">${esc(lead.name||'Sem nome')}</div>
+          <div class="search-result-meta">
+            ${esc(lead.phone||'Sem telefone')}
+            ${lead.product?` · ${esc(lead.product)}`:''}
+          </div>
+        </div>
+
+        <span class="pill pill-${lead.status} search-result-status">
+          ${esc(pillLabel(lead.status))}
+        </span>
+      </button>
+    `).join('')}
+  `;
+
+  box.classList.add('show');
+}
+
+function highlightSearchResult(){
+  qsa('.search-result-item').forEach((item,index)=>{
+    item.classList.toggle('active',index===searchSelectedIndex);
+  });
+
+  const selected=q(`.search-result-item[data-search-index="${searchSelectedIndex}"]`);
+  selected?.scrollIntoView({
+    block:'nearest'
+  });
+}
+
+function handleSearchKey(event){
+  const box=$('search-results');
+
+  if(event.key==='Escape'){
+    closeSearchResults();
+    event.currentTarget.blur();
+    return;
+  }
+
+  if(!box?.classList.contains('show') || !searchResultsCache.length){
+    return;
+  }
+
+  if(event.key==='ArrowDown'){
+    event.preventDefault();
+    searchSelectedIndex=
+      (searchSelectedIndex+1)%searchResultsCache.length;
+    highlightSearchResult();
+    return;
+  }
+
+  if(event.key==='ArrowUp'){
+    event.preventDefault();
+    searchSelectedIndex=
+      searchSelectedIndex<=0
+        ? searchResultsCache.length-1
+        : searchSelectedIndex-1;
+    highlightSearchResult();
+    return;
+  }
+
+  if(event.key==='Enter'){
+    event.preventDefault();
+
+    const selected=
+      searchSelectedIndex>=0
+        ? searchResultsCache[searchSelectedIndex]
+        : searchResultsCache[0];
+
+    if(selected){
+      openSearchResult(selected.id);
+    }
+  }
+}
+
+function openSearchResult(leadId){
+  const lead=leads.find(item=>item.id===leadId);
+
+  if(!lead){
+    toast('Cliente não encontrado','err');
+    return;
+  }
+
+  closeSearchResults();
+
+  const input=$('search-inp');
+  if(input){
+    input.value='';
+    input.blur();
+  }
+
+  openDetail(leadId);
+}
+
+document.addEventListener('click',event=>{
+  const wrap=$('search-wrap');
+
+  if(
+    wrap &&
+    !wrap.contains(event.target)
+  ){
+    closeSearchResults();
+  }
+});
 
 // ============================================================
 //  SET TODAY IN REMINDER
