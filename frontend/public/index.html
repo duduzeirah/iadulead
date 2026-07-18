@@ -409,6 +409,36 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
   #m-automation .modal-box{padding:20px 16px}
 }
 
+
+/* CENTRAL DE INTELIGÊNCIA */
+.intel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:22px}
+.intel-card{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:17px;position:relative;overflow:hidden}
+.intel-card::before{content:'';position:absolute;left:0;right:0;top:0;height:3px;background:var(--brand)}
+.intel-card.warn::before{background:var(--warn)}
+.intel-card.info::before{background:var(--info)}
+.intel-card.purple::before{background:var(--purple)}
+.intel-card.danger::before{background:var(--danger)}
+.intel-card .intel-icon{font-size:22px;margin-bottom:9px}
+.intel-card .intel-label{font-size:10px;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.6px}
+.intel-card .intel-value{font-family:'Sora',sans-serif;font-size:28px;font-weight:800;margin-top:5px}
+.intel-card .intel-sub{font-size:11px;color:var(--t3);margin-top:4px}
+.intel-history{display:flex;flex-direction:column;gap:10px}
+.intel-log{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:15px;display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:12px;align-items:start}
+.intel-log-icon{width:42px;height:42px;border-radius:12px;background:var(--brand-pale);display:flex;align-items:center;justify-content:center;font-size:19px}
+.intel-log.error .intel-log-icon{background:rgba(240,77,91,.12)}
+.intel-log-main{min-width:0}
+.intel-log-title{font-size:13px;font-weight:700}
+.intel-log-sub{font-size:11px;color:var(--t3);margin-top:3px}
+.intel-log-msg{font-size:12px;color:var(--t2);margin-top:8px;padding:8px 10px;border-radius:6px;background:var(--bg3);border:1px solid var(--b1);word-break:break-word}
+.intel-log-flow{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:9px;font-size:11px}
+.intel-log-stage{padding:4px 8px;border-radius:20px;background:var(--bg3);border:1px solid var(--b1)}
+.intel-log-time{font-size:10px;color:var(--t3);white-space:nowrap}
+.intel-toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+@media(max-width:650px){
+  .intel-log{grid-template-columns:38px minmax(0,1fr)}
+  .intel-log-time{grid-column:2}
+}
+
 /* CONFIG */
 .cfg-section{background:var(--bg2);border:1px solid var(--b1);border-radius:var(--r);padding:18px;margin-bottom:14px}
 .cfg-title{font-size:14px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
@@ -558,6 +588,7 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
       <button class="sb-item" data-page="lembretes" onclick="go('lembretes',this)"><span class="sb-icon">⏰</span>Lembretes</button>
       <button class="sb-item" data-page="templates" onclick="go('templates',this)"><span class="sb-icon">📝</span>Mensagens Prontas</button>
       <button class="sb-item" data-page="automacoes" onclick="go('automacoes',this)"><span class="sb-icon">🤖</span>Automações</button>
+      <button class="sb-item" data-page="inteligencia" onclick="go('inteligencia',this)"><span class="sb-icon">🧠</span>Inteligência</button>
       <button class="sb-item" data-page="config" onclick="go('config',this)"><span class="sb-icon">⚙️</span>Configurações</button>
     </div>
     <div id="sb-trial-box" class="sb-trial hidden">
@@ -693,6 +724,47 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 
         <div id="automation-list" class="auto-grid">
           <div class="auto-empty"><div class="empty"><div class="loader"></div><p style="margin-top:10px">Carregando automações...</p></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CENTRAL DE INTELIGÊNCIA -->
+    <div class="page" id="pg-inteligencia">
+      <div class="page-inner">
+        <div class="sec-hdr">
+          <div>
+            <h2>🧠 Central de Inteligência</h2>
+            <p>Acompanhe automações, clientes quentes e pontos de atenção</p>
+          </div>
+          <div class="intel-toolbar">
+            <button class="btn btn-outline btn-sm" onclick="loadIntelligence(true)">↻ Atualizar</button>
+          </div>
+        </div>
+
+        <div id="intel-error"></div>
+
+        <div class="intel-grid" id="intel-summary">
+          <div class="intel-card"><div class="intel-icon">👥</div><div class="intel-label">Total de leads</div><div class="intel-value">—</div></div>
+          <div class="intel-card purple"><div class="intel-icon">⚡</div><div class="intel-label">Automações executadas</div><div class="intel-value">—</div></div>
+          <div class="intel-card"><div class="intel-icon">✅</div><div class="intel-label">Execuções com sucesso</div><div class="intel-value">—</div></div>
+          <div class="intel-card info"><div class="intel-icon">⏳</div><div class="intel-label">Aguardando</div><div class="intel-value">—</div></div>
+          <div class="intel-card danger"><div class="intel-icon">🔥</div><div class="intel-label">Clientes quentes</div><div class="intel-value">—</div></div>
+        </div>
+
+        <div class="sec-hdr">
+          <div>
+            <h2>📜 Histórico das automações</h2>
+            <p>Últimas movimentações feitas automaticamente pelo sistema</p>
+          </div>
+          <div class="filter-bar" style="margin:0">
+            <button class="fchip on" id="intel-filter-all" onclick="setIntelligenceFilter('all',this)">Todos</button>
+            <button class="fchip" id="intel-filter-success" onclick="setIntelligenceFilter('success',this)">Sucessos</button>
+            <button class="fchip" id="intel-filter-error" onclick="setIntelligenceFilter('error',this)">Erros</button>
+          </div>
+        </div>
+
+        <div id="intel-history" class="intel-history">
+          <div class="empty"><div class="loader"></div><p style="margin-top:10px">Carregando inteligência...</p></div>
         </div>
       </div>
     </div>
@@ -994,6 +1066,10 @@ let activeChatLeadId = null;
 let chatRefreshTimer = null;
 let automaticRefreshTimer = null;
 let automationRules = [];
+let intelligenceSummary = null;
+let intelligenceHistory = [];
+let intelligenceFilter = 'all';
+let intelligenceLoaded = false;
 
 const PIPELINE_DEFAULTS={
   novo:{label:'Novos Leads',description:'Contato recém-chegado',color:'#00C566',order:1},
@@ -1253,7 +1329,7 @@ async function loadDash() {
 // ============================================================
 //  NAV
 // ============================================================
-const PT={dashboard:'Dashboard',pipeline:'Pipeline Kanban',todos:'Todos os Leads',remarketing:'Remarketing',lembretes:'Lembretes',templates:'Mensagens Prontas',automacoes:'Automações',config:'Configurações'};
+const PT={dashboard:'Dashboard',pipeline:'Pipeline Kanban',todos:'Todos os Leads',remarketing:'Remarketing',lembretes:'Lembretes',templates:'Mensagens Prontas',automacoes:'Automações',inteligencia:'Central de Inteligência',config:'Configurações'};
 const PAGE_STATUS={novos:'novo',atendendo:'atendendo',aguardando:'aguardando',fechados:'fechado',compraram:'comprou',assinantes:'assinante',inativos:'inativo',sumidos:'sumido'};
 
 function go(page,el) {
@@ -1279,10 +1355,177 @@ function renderPage(page) {
   else if(page==='lembretes') renderLembretes();
   else if(page==='templates') renderTemplates();
   else if(page==='automacoes') loadAutomations();
+  else if(page==='inteligencia') loadIntelligence();
   else if(page==='config') renderPipelineConfig();
   else if(sm[page]) renderStatusPage(page,sm[page]);
 }
 
+
+
+// ============================================================
+//  CENTRAL DE INTELIGÊNCIA
+// ============================================================
+
+function intelligencePercent(success,total){
+  const s=Number(success)||0;
+  const t=Number(total)||0;
+  return t ? Math.round((s/t)*100) : 0;
+}
+
+function renderIntelligenceSummary(){
+  const wrap=$('intel-summary');
+  if(!wrap) return;
+
+  const data=intelligenceSummary||{};
+  const total=Number(data.automation_executions)||0;
+  const success=Number(data.automation_success)||0;
+  const rate=intelligencePercent(success,total);
+
+  const cards=[
+    {icon:'👥',label:'Total de leads',value:Number(data.total_leads)||0,sub:'Contatos cadastrados',cls:''},
+    {icon:'⚡',label:'Automações executadas',value:total,sub:'Execuções registradas',cls:'purple'},
+    {icon:'✅',label:'Execuções com sucesso',value:success,sub:`Taxa de sucesso: ${rate}%`,cls:''},
+    {icon:'⏳',label:'Clientes aguardando',value:Number(data.waiting)||0,sub:'Precisam de acompanhamento',cls:'info'},
+    {icon:'🔥',label:'Clientes quentes',value:Number(data.hot)||0,sub:'Maior chance de conversão',cls:'danger'}
+  ];
+
+  wrap.innerHTML=cards.map(card=>`
+    <div class="intel-card ${card.cls}">
+      <div class="intel-icon">${card.icon}</div>
+      <div class="intel-label">${esc(card.label)}</div>
+      <div class="intel-value">${card.value}</div>
+      <div class="intel-sub">${esc(card.sub)}</div>
+    </div>
+  `).join('');
+}
+
+function intelligenceSourceLabel(source,eventType){
+  const value=source||eventType||'';
+  if(value==='outbound_message') return 'Mensagem enviada pela equipe';
+  if(value==='inbound_message') return 'Mensagem recebida do cliente';
+  if(value==='classification_change') return 'Classificação alterada';
+  return 'Automação executada';
+}
+
+function intelligenceLogMatches(log){
+  if(intelligenceFilter==='success') return Boolean(log.success);
+  if(intelligenceFilter==='error') return !log.success;
+  return true;
+}
+
+function renderIntelligenceHistory(){
+  const wrap=$('intel-history');
+  if(!wrap) return;
+
+  const rows=(intelligenceHistory||[]).filter(intelligenceLogMatches);
+
+  if(!rows.length){
+    wrap.innerHTML=`
+      <div class="empty">
+        <div class="ei">🧠</div>
+        <h3>Nenhum registro encontrado</h3>
+        <p>As automações executadas aparecerão aqui.</p>
+      </div>
+    `;
+    return;
+  }
+
+  wrap.innerHTML=rows.map(log=>{
+    const leadName=log.name||log.phone||'Cliente não identificado';
+    const ruleName=log.rule_name||'Regra removida ou não identificada';
+    const previous=log.previous_status ? statusLabel(log.previous_status) : '—';
+    const next=log.new_status ? statusLabel(log.new_status) : '—';
+    const message=String(log.message||'').trim();
+    const error=String(log.error_message||'').trim();
+
+    return `
+      <div class="intel-log ${log.success?'':'error'}">
+        <div class="intel-log-icon">${log.success?'🤖':'⚠️'}</div>
+
+        <div class="intel-log-main">
+          <div class="intel-log-title">${esc(leadName)}</div>
+          <div class="intel-log-sub">
+            ${esc(ruleName)} · ${esc(intelligenceSourceLabel(log.source,log.event_type))}
+          </div>
+
+          ${message?`<div class="intel-log-msg">“${esc(message)}”</div>`:''}
+          ${error?`<div class="alert danger" style="margin:8px 0 0"><div class="alert-icon">❌</div><div>${esc(error)}</div></div>`:''}
+
+          <div class="intel-log-flow">
+            <span class="intel-log-stage">${esc(previous)}</span>
+            <span style="color:var(--brand);font-weight:800">→</span>
+            <span class="intel-log-stage">${esc(next)}</span>
+            ${log.matched_keyword?`<span class="auto-keyword">${esc(log.matched_keyword)}</span>`:''}
+          </div>
+        </div>
+
+        <div class="intel-log-time">${relTime(log.created_at)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+function setIntelligenceFilter(filter,button){
+  intelligenceFilter=filter;
+  ['intel-filter-all','intel-filter-success','intel-filter-error'].forEach(id=>{
+    $(id)?.classList.remove('on');
+  });
+  button?.classList.add('on');
+  renderIntelligenceHistory();
+}
+
+async function loadIntelligence(force=false){
+  const historyWrap=$('intel-history');
+  const errorWrap=$('intel-error');
+
+  if(!force && intelligenceLoaded){
+    renderIntelligenceSummary();
+    renderIntelligenceHistory();
+    return;
+  }
+
+  if(historyWrap && !intelligenceLoaded){
+    historyWrap.innerHTML=`<div class="empty"><div class="loader"></div><p style="margin-top:10px">Carregando inteligência...</p></div>`;
+  }
+
+  if(errorWrap) errorWrap.innerHTML='';
+
+  try{
+    const [summary,history]=await Promise.all([
+      api('GET','/intelligence/summary'),
+      api('GET','/intelligence/history')
+    ]);
+
+    intelligenceSummary=summary||{};
+    intelligenceHistory=Array.isArray(history)?history:[];
+    intelligenceLoaded=true;
+
+    renderIntelligenceSummary();
+    renderIntelligenceHistory();
+  }catch(error){
+    if(errorWrap){
+      errorWrap.innerHTML=`
+        <div class="alert danger">
+          <div class="alert-icon">❌</div>
+          <div>
+            <strong>Não foi possível carregar a Central de Inteligência.</strong><br>
+            ${esc(error.message||'Erro desconhecido')}
+          </div>
+        </div>
+      `;
+    }
+
+    if(historyWrap){
+      historyWrap.innerHTML=`
+        <div class="empty">
+          <div class="ei">⚠️</div>
+          <h3>Falha ao carregar</h3>
+          <p>Confira se a rota de inteligência foi publicada no backend.</p>
+        </div>
+      `;
+    }
+  }
+}
 
 // ============================================================
 //  AUTOMAÇÕES
@@ -2418,7 +2661,7 @@ async function refreshOperationalView(){
 
     // A página de automações não depende da lista de leads.
     // Evita recarregar a tela e causar o efeito de piscar.
-    if(page==='automacoes'){
+    if(page==='automacoes' || page==='inteligencia'){
       return;
     }
 
