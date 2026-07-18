@@ -491,6 +491,23 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 
 .qr-box{width:130px;height:130px;border:2px dashed var(--b2);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;background:var(--bg3);font-size:11px;color:var(--t3)}
 
+.wa-provider-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.wa-provider{padding:14px;border:1px solid var(--b1);border-radius:var(--r);background:var(--bg3);cursor:pointer;transition:.15s;text-align:left;color:var(--t1);font-family:inherit}
+.wa-provider:hover,.wa-provider.active{border-color:var(--brand);background:var(--brand-pale)}
+.wa-provider.disabled{opacity:.55;cursor:not-allowed}
+.wa-provider-title{font-size:13px;font-weight:700}.wa-provider-sub{font-size:11px;color:var(--t3);margin-top:4px;line-height:1.45}
+.wa-connection-panel{padding:16px;border:1px solid var(--b1);border-radius:var(--r);background:var(--bg1)}
+.wa-status-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.wa-status-dot{width:9px;height:9px;border-radius:50%;background:var(--t3)}
+.wa-status-dot.connected{background:var(--brand);box-shadow:0 0 10px var(--brand)}
+.wa-status-dot.connecting{background:var(--warn)}
+.wa-status-label{font-size:13px;font-weight:700}.wa-instance{font-size:10px;color:var(--t3);margin-left:auto}
+.wa-qr{width:220px;height:220px;max-width:100%;margin:12px auto;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:12px;padding:10px}
+.wa-qr img{width:100%;height:100%;object-fit:contain}.wa-qr-placeholder{color:#222;text-align:center;font-size:12px}
+.wa-actions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+@media(max-width:600px){.wa-provider-grid{grid-template-columns:1fr}.wa-instance{width:100%;margin-left:17px}.wa-actions .btn{flex:1}}
+
+
 /* OVERLAY (mobile) */
 #sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:199}
 #sb-overlay.show{display:block}
@@ -852,8 +869,31 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
         <div class="sec-hdr"><div><h2>⚙️ Configurações</h2></div></div>
         <div class="cfg-section">
           <div class="cfg-title">🔗 Conexão WhatsApp</div>
-          <div style="text-align:center;margin-bottom:14px"><div class="qr-box">QR Code</div><button class="btn btn-brand" onclick="toast('Em breve! Use o botão 💬 nos leads para abrir diretamente.','warn')">Conectar WhatsApp</button></div>
-          <div class="alert brand"><div class="alert-icon">ℹ️</div><div>Por enquanto, use o botão <strong>💬</strong> em cada lead para abrir o WhatsApp Web diretamente. Integração automática em breve!</div></div>
+          <div class="wa-provider-grid">
+            <button class="wa-provider active" id="wa-provider-evolution" onclick="selectWhatsAppProvider('evolution')">
+              <div class="wa-provider-title">⚡ Evolution API</div>
+              <div class="wa-provider-sub">Conecte escaneando o QR Code diretamente dentro do Iadu Lead.</div>
+            </button>
+            <button class="wa-provider disabled" id="wa-provider-meta" onclick="startMetaConnection()">
+              <div class="wa-provider-title">✅ API oficial da Meta</div>
+              <div class="wa-provider-sub">Conexão oficial via Facebook. Estrutura preparada para a próxima etapa.</div>
+            </button>
+          </div>
+          <div class="wa-connection-panel">
+            <div class="wa-status-row">
+              <span class="wa-status-dot" id="wa-status-dot"></span>
+              <span class="wa-status-label" id="wa-status-label">Consultando conexão...</span>
+              <span class="wa-instance" id="wa-instance"></span>
+            </div>
+            <div id="wa-phone" style="font-size:12px;color:var(--t2);text-align:center"></div>
+            <div class="wa-qr hidden" id="wa-qr"><div class="wa-qr-placeholder">O QR Code aparecerá aqui.</div></div>
+            <div class="wa-actions">
+              <button class="btn btn-brand" id="wa-connect-btn" onclick="connectEvolutionWhatsApp()">📱 Conectar WhatsApp</button>
+              <button class="btn btn-outline hidden" id="wa-refresh-btn" onclick="connectEvolutionWhatsApp()">🔄 Atualizar QR</button>
+              <button class="btn btn-danger hidden" id="wa-disconnect-btn" onclick="disconnectEvolutionWhatsApp()">Desconectar</button>
+            </div>
+          </div>
+          <div class="alert brand" style="margin-top:12px"><div class="alert-icon">🔒</div><div>Cada empresa possui sua própria instância. As mensagens e os contatos ficam separados pelo tenant.</div></div>
         </div>
         <div class="cfg-section">
           <div class="cfg-title">🤖 Automações</div>
@@ -1433,11 +1473,114 @@ function renderPage(page) {
   else if(page==='templates') renderTemplates();
   else if(page==='automacoes') loadAutomations();
   else if(page==='inteligencia') loadIntelligence();
-  else if(page==='config') renderPipelineConfig();
+  else if(page==='config'){ renderPipelineConfig(); loadWhatsAppConnection(); }
   else if(sm[page]) renderStatusPage(page,sm[page]);
 }
 
 
+
+// ============================================================
+//  CONEXÃO WHATSAPP MULTIEMPRESA
+// ============================================================
+let whatsappStatusTimer=null;
+
+function selectWhatsAppProvider(provider){
+  if(provider==='evolution') loadWhatsAppConnection();
+}
+
+function normalizeWaStatus(status){
+  const value=String(status||'').toLowerCase();
+  if(['connected','open'].includes(value)) return 'connected';
+  if(value==='connecting') return 'connecting';
+  return 'disconnected';
+}
+
+function renderWhatsAppConnection(data={}){
+  const status=normalizeWaStatus(data.status);
+  const dot=$('wa-status-dot');
+  const label=$('wa-status-label');
+  const instance=$('wa-instance');
+  const phone=$('wa-phone');
+  const connect=$('wa-connect-btn');
+  const refresh=$('wa-refresh-btn');
+  const disconnect=$('wa-disconnect-btn');
+  if(!dot||!label) return;
+
+  dot.className=`wa-status-dot ${status}`;
+  label.textContent=status==='connected'?'WhatsApp conectado':status==='connecting'?'Aguardando leitura do QR Code':'WhatsApp desconectado';
+  instance.textContent=data.instance_name?`Instância: ${data.instance_name}`:'';
+  phone.textContent=data.phone_number?`Número conectado: +${data.phone_number}`:'';
+  connect?.classList.toggle('hidden',status!=='disconnected');
+  refresh?.classList.toggle('hidden',status!=='connecting');
+  disconnect?.classList.toggle('hidden',status==='disconnected');
+  if(status==='connected') $('wa-qr')?.classList.add('hidden');
+}
+
+async function loadWhatsAppConnection(silent=false){
+  try{
+    const data=await api('GET','/whatsapp/status');
+    renderWhatsAppConnection(data);
+    if(normalizeWaStatus(data.status)==='connecting') startWhatsAppStatusPolling();
+    else stopWhatsAppStatusPolling();
+  }catch(error){
+    renderWhatsAppConnection({status:'disconnected'});
+    if(!silent) toast(error.message||'Erro ao consultar WhatsApp','err');
+  }
+}
+
+function showWhatsAppQr(value){
+  const box=$('wa-qr');
+  if(!box||!value) return;
+  let source=String(value);
+  if(!source.startsWith('data:image')) source=`data:image/png;base64,${source}`;
+  box.innerHTML=`<img src="${source}" alt="QR Code do WhatsApp">`;
+  box.classList.remove('hidden');
+}
+
+async function connectEvolutionWhatsApp(){
+  const button=$('wa-connect-btn');
+  const refresh=$('wa-refresh-btn');
+  if(button) setBtnLoading(button,true);
+  if(refresh) setBtnLoading(refresh,true);
+  try{
+    const data=await api('POST','/whatsapp/evolution/connect',{});
+    renderWhatsAppConnection(data);
+    if(data.qr_code) showWhatsAppQr(data.qr_code);
+    else toast('Instância criada, mas o QR ainda não foi retornado. Clique em Atualizar QR.','warn');
+    startWhatsAppStatusPolling();
+  }catch(error){
+    toast(error.message||'Erro ao gerar QR Code','err');
+  }finally{
+    if(button) setBtnLoading(button,false);
+    if(refresh) setBtnLoading(refresh,false);
+  }
+}
+
+async function disconnectEvolutionWhatsApp(){
+  if(!confirm('Desconectar este WhatsApp do Iadu Lead?')) return;
+  const button=$('wa-disconnect-btn');
+  setBtnLoading(button,true);
+  try{
+    await api('POST','/whatsapp/evolution/disconnect',{});
+    $('wa-qr')?.classList.add('hidden');
+    renderWhatsAppConnection({status:'disconnected'});
+    stopWhatsAppStatusPolling();
+    toast('WhatsApp desconectado.','ok');
+  }catch(error){
+    toast(error.message||'Erro ao desconectar','err');
+  }finally{ setBtnLoading(button,false); }
+}
+
+function startWhatsAppStatusPolling(){
+  stopWhatsAppStatusPolling();
+  whatsappStatusTimer=setInterval(()=>loadWhatsAppConnection(true),4000);
+}
+function stopWhatsAppStatusPolling(){
+  if(whatsappStatusTimer){clearInterval(whatsappStatusTimer);whatsappStatusTimer=null;}
+}
+function startMetaConnection(){
+  toast('A conexão oficial da Meta será ativada após cadastrar o aplicativo e o Embedded Signup.','warn');
+}
 
 // ============================================================
 //  CENTRAL DE INTELIGÊNCIA
