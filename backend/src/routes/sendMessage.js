@@ -1,7 +1,7 @@
 const express = require('express');
-const axios = require('axios');
 const db = require('../db');
 const { auth } = require('../middleware/auth');
+const { evolutionRequest } = require('../services/evolutionService');
 
 const {
   processMessageAutomation
@@ -11,20 +11,6 @@ const router = express.Router();
 
 router.use(auth);
 
-/*
-=====================================================
-CONFIGURAÇÃO DA EVOLUTION
-=====================================================
-*/
-
-const EVOLUTION_URL =
-  'https://evolution-api-production-0819.up.railway.app';
-
-const EVOLUTION_INSTANCE =
-  process.env.EVOLUTION_INSTANCE || 'iadulead';
-
-const EVOLUTION_API_KEY =
-  process.env.EVOLUTION_API_KEY;
 
 /*
 =====================================================
@@ -120,23 +106,40 @@ router.post('/', async (req, res) => {
 
     /*
     =====================================================
-    CONFERE CONFIGURAÇÃO DA EVOLUTION
+    BUSCA A CONEXÃO DA EMPRESA
     =====================================================
     */
 
-    if (!EVOLUTION_API_KEY) {
-      return res.status(500).json({
+    const connectionResult = await db.query(
+      `SELECT provider, instance_name, status
+       FROM whatsapp_connections
+       WHERE tenant_id = $1
+       LIMIT 1`,
+      [tenantId]
+    );
+
+    const connection = connectionResult.rows[0];
+
+    if (!connection) {
+      return res.status(409).json({
         success: false,
-        error:
-          'EVOLUTION_API_KEY não configurada no serviço iadulead'
+        error: 'Conecte o WhatsApp nas Configurações antes de enviar mensagens.'
       });
     }
 
-    const endpoint =
-      `${EVOLUTION_URL}/message/sendText/` +
-      encodeURIComponent(
-        EVOLUTION_INSTANCE
-      );
+    if (connection.provider !== 'evolution') {
+      return res.status(409).json({
+        success: false,
+        error: 'O provedor de WhatsApp desta empresa ainda não está disponível para envio.'
+      });
+    }
+
+    if (!connection.instance_name) {
+      return res.status(409).json({
+        success: false,
+        error: 'Instância Evolution não configurada para esta empresa.'
+      });
+    }
 
     /*
     =====================================================
@@ -144,26 +147,11 @@ router.post('/', async (req, res) => {
     =====================================================
     */
 
-    const evolutionResponse =
-      await axios({
-        method: 'post',
-        url: endpoint,
-
-        headers: {
-          apikey:
-            EVOLUTION_API_KEY,
-
-          'Content-Type':
-            'application/json'
-        },
-
-        data: {
-          number: phone,
-          text: cleanMessage
-        },
-
-        timeout: 20000
-      });
+    const evolutionResponse = await evolutionRequest(
+      'post',
+      `/message/sendText/${encodeURIComponent(connection.instance_name)}`,
+      { number: phone, text: cleanMessage }
+    );
 
     /*
     =====================================================
