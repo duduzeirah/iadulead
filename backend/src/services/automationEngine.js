@@ -6,19 +6,6 @@ const db = require('../db');
 =====================================================
 NORMALIZAÇÃO DE TEXTO
 =====================================================
-
-Transforma:
-
-"Já fiz o PIX!"
-em:
-"ja fiz o pix"
-
-Isso permite reconhecer frases mesmo com:
-- letras maiúsculas;
-- acentos;
-- pontuação;
-- espaços duplicados.
-=====================================================
 */
 
 function normalizeText(value = '') {
@@ -51,17 +38,6 @@ function normalizeKeywords(keywords) {
 =====================================================
 CONFERE PALAVRAS NEGATIVAS
 =====================================================
-
-Se uma regra reconhece:
-
-"pagamento confirmado"
-
-mas a mensagem diz:
-
-"pagamento não confirmado"
-
-a automação não pode ser executada.
-=====================================================
 */
 
 function hasNegativeKeyword(text, negativeKeywords) {
@@ -76,18 +52,6 @@ function hasNegativeKeyword(text, negativeKeywords) {
 /*
 =====================================================
 CONFERE SE A REGRA COMBINA COM A MENSAGEM
-=====================================================
-
-Modos disponíveis:
-
-contains_any:
-Basta encontrar uma das frases.
-
-contains_all:
-Precisa encontrar todas as frases.
-
-exact:
-A mensagem precisa ser exatamente igual.
 =====================================================
 */
 
@@ -292,18 +256,6 @@ async function findMessageRule({
 =====================================================
 ENCONTRA REGRA PARA ALTERAÇÃO DE CLASSIFICAÇÃO
 =====================================================
-
-Exemplo:
-
-Campo:
-commercial_priority
-
-Valor:
-resolvido
-
-Ação:
-mover para comprou
-=====================================================
 */
 
 async function findClassificationRule({
@@ -358,11 +310,6 @@ async function findClassificationRule({
 /*
 =====================================================
 ATUALIZA O STATUS DO LEAD
-=====================================================
-
-Usamos parâmetros booleanos separados para evitar o erro:
-
-"inconsistent types deduced for parameter"
 =====================================================
 */
 
@@ -420,7 +367,7 @@ async function updateLeadStatus({
 
 /*
 =====================================================
-REGISTRA A AUTOMAÇÃO NO HISTÓRICO
+REGISTRA A AUTOMAÇÃO NO HISTÓRICO DO LEAD
 =====================================================
 */
 
@@ -500,6 +447,83 @@ async function registerAutomationActivity({
 
 /*
 =====================================================
+REGISTRA EXECUÇÃO NA TABELA AUTOMATION_LOGS
+=====================================================
+*/
+
+async function registerAutomationLog({
+  tenantId,
+  leadId,
+  rule = null,
+  eventType = null,
+  source = null,
+  previousStatus = null,
+  newStatus = null,
+  matchedKeyword = null,
+  message = null,
+  success = true,
+  errorMessage = null,
+  metadata = {}
+}) {
+  try {
+    await db.query(
+      `
+      INSERT INTO automation_logs (
+        tenant_id,
+        automation_rule_id,
+        lead_id,
+        event_type,
+        source,
+        previous_status,
+        new_status,
+        matched_keyword,
+        message,
+        success,
+        error_message,
+        metadata,
+        created_at
+      )
+      VALUES (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6::lead_status,
+        $7::lead_status,
+        $8,
+        $9,
+        $10,
+        $11,
+        $12::jsonb,
+        NOW()
+      )
+      `,
+      [
+        tenantId,
+        rule?.id || null,
+        leadId || null,
+        eventType || rule?.event_type || null,
+        source,
+        previousStatus || null,
+        newStatus || null,
+        matchedKeyword,
+        message,
+        Boolean(success),
+        errorMessage,
+        JSON.stringify(metadata || {})
+      ]
+    );
+  } catch (error) {
+    console.error(
+      '❌ Erro ao registrar histórico da automação:',
+      error
+    );
+  }
+}
+
+/*
+=====================================================
 EXECUTA A REGRA ENCONTRADA
 =====================================================
 */
@@ -517,15 +541,10 @@ async function executeRule({
     return {
       matched: false,
       changed: false,
-      previousStatus:
-        currentStatus,
-
-      newStatus:
-        currentStatus,
-
+      previousStatus: currentStatus,
+      newStatus: currentStatus,
       rule: null,
-      reason:
-        'Nenhuma automação encontrada'
+      reason: 'Nenhuma automação encontrada'
     };
   }
 
@@ -533,121 +552,153 @@ async function executeRule({
     match.rule.action_status;
 
   if (!newStatus) {
+    await registerAutomationLog({
+      tenantId,
+      leadId,
+      rule: match.rule,
+      eventType: match.rule.event_type,
+      source,
+      previousStatus: currentStatus,
+      newStatus: currentStatus,
+      matchedKeyword: match.matchedKeyword,
+      message,
+      success: false,
+      errorMessage:
+        'A regra não possui uma etapa de destino',
+      metadata: {
+        reason: match.reason
+      }
+    });
+
     return {
       matched: true,
       changed: false,
-      previousStatus:
-        currentStatus,
-
-      newStatus:
-        currentStatus,
-
-      rule:
-        match.rule,
-
+      previousStatus: currentStatus,
+      newStatus: currentStatus,
+      rule: match.rule,
+      matchedKeyword: match.matchedKeyword,
       reason:
         'A regra não possui uma etapa de destino'
     };
   }
 
   if (newStatus === currentStatus) {
+    await registerAutomationLog({
+      tenantId,
+      leadId,
+      rule: match.rule,
+      eventType: match.rule.event_type,
+      source,
+      previousStatus: currentStatus,
+      newStatus,
+      matchedKeyword: match.matchedKeyword,
+      message,
+      success: true,
+      metadata: {
+        changed: false,
+        reason:
+          'O lead já está na etapa indicada pela regra'
+      }
+    });
+
     return {
       matched: true,
       changed: false,
-      previousStatus:
-        currentStatus,
-
-      newStatus:
-        currentStatus,
-
-      rule:
-        match.rule,
-
-      matchedKeyword:
-        match.matchedKeyword,
-
+      previousStatus: currentStatus,
+      newStatus: currentStatus,
+      rule: match.rule,
+      matchedKeyword: match.matchedKeyword,
       reason:
         'O lead já está na etapa indicada pela regra'
     };
   }
 
-  const updatedLead =
-    await updateLeadStatus({
+  try {
+    const updatedLead =
+      await updateLeadStatus({
+        tenantId,
+        leadId,
+        newStatus
+      });
+
+    if (!updatedLead) {
+      throw new Error(
+        'Lead não encontrado ao executar automação'
+      );
+    }
+
+    await registerAutomationActivity({
       tenantId,
       leadId,
-      newStatus
+      userId,
+      previousStatus: currentStatus,
+      newStatus,
+      rule: match.rule,
+      source,
+      message,
+      matchedKeyword: match.matchedKeyword,
+      reason: match.reason
     });
 
-  if (!updatedLead) {
-    throw new Error(
-      'Lead não encontrado ao executar automação'
+    await registerAutomationLog({
+      tenantId,
+      leadId,
+      rule: match.rule,
+      eventType: match.rule.event_type,
+      source,
+      previousStatus: currentStatus,
+      newStatus,
+      matchedKeyword: match.matchedKeyword,
+      message,
+      success: true,
+      metadata: {
+        changed: true,
+        reason: match.reason
+      }
+    });
+
+    console.log(
+      `🤖 Automação executada: ` +
+      `${match.rule.name} | ` +
+      `${currentStatus} → ${newStatus}`
     );
+
+    return {
+      matched: true,
+      changed: true,
+      previousStatus: currentStatus,
+      newStatus,
+      rule: match.rule,
+      matchedKeyword: match.matchedKeyword,
+      reason: match.reason,
+      lead: updatedLead
+    };
+
+  } catch (error) {
+    await registerAutomationLog({
+      tenantId,
+      leadId,
+      rule: match.rule,
+      eventType: match.rule.event_type,
+      source,
+      previousStatus: currentStatus,
+      newStatus,
+      matchedKeyword: match.matchedKeyword,
+      message,
+      success: false,
+      errorMessage: error.message,
+      metadata: {
+        reason: match.reason
+      }
+    });
+
+    throw error;
   }
-
-  await registerAutomationActivity({
-    tenantId,
-    leadId,
-    userId,
-    previousStatus:
-      currentStatus,
-
-    newStatus,
-
-    rule:
-      match.rule,
-
-    source,
-
-    message,
-
-    matchedKeyword:
-      match.matchedKeyword,
-
-    reason:
-      match.reason
-  });
-
-  console.log(
-    `🤖 Automação executada: ` +
-    `${match.rule.name} | ` +
-    `${currentStatus} → ${newStatus}`
-  );
-
-  return {
-    matched: true,
-    changed: true,
-
-    previousStatus:
-      currentStatus,
-
-    newStatus,
-
-    rule:
-      match.rule,
-
-    matchedKeyword:
-      match.matchedKeyword,
-
-    reason:
-      match.reason,
-
-    lead:
-      updatedLead
-  };
 }
 
 /*
 =====================================================
 PROCESSA MENSAGEM ENVIADA OU RECEBIDA
-=====================================================
-
-eventType:
-
-outbound_message
-Mensagem enviada pela equipe.
-
-inbound_message
-Mensagem enviada pelo cliente.
 =====================================================
 */
 
@@ -703,11 +754,6 @@ async function processMessageAutomation({
       '❌ Erro no motor de automação de mensagem:',
       error
     );
-
-    /*
-    O erro da automação não deve impedir
-    o envio ou recebimento da mensagem.
-    */
 
     return {
       matched: false,
@@ -820,6 +866,7 @@ module.exports = {
   getAutomationRules,
   findMessageRule,
   findClassificationRule,
+  registerAutomationLog,
   processMessageAutomation,
   processClassificationAutomation
 };
