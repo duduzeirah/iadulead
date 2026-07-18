@@ -315,6 +315,26 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 .chat-compose textarea{flex:1;min-height:44px;max-height:120px;resize:vertical;background:var(--bg3);border:1px solid var(--b1);color:var(--t1);border-radius:10px;padding:11px 12px;font:inherit;font-size:13px;outline:none}
 .chat-compose textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-glow)}
 .chat-side{padding:20px;min-height:0;overflow-y:auto;overscroll-behavior:contain;border-left:1px solid var(--b1);background:var(--bg1)}
+
+.ai-reply-wrap{border-top:1px solid var(--b1);background:var(--bg1);padding:10px 12px 0}
+.ai-reply-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ai-reply-btn{background:linear-gradient(135deg,rgba(155,109,255,.18),rgba(0,197,102,.12));border:1px solid rgba(155,109,255,.4);color:var(--t1)}
+.ai-reply-btn:hover{border-color:var(--purple);color:#fff;background:rgba(155,109,255,.18)}
+.ai-reply-hint{font-size:10px;color:var(--t3)}
+.ai-suggestion{display:none;margin-top:9px;padding:12px;background:var(--bg2);border:1px solid rgba(155,109,255,.32);border-radius:10px}
+.ai-suggestion.show{display:block}
+.ai-suggestion-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ai-suggestion-title{font-size:12px;font-weight:700;flex:1}
+.ai-suggestion-mode{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--purple);background:rgba(155,109,255,.12);padding:3px 7px;border-radius:20px}
+.ai-suggestion-text{font-size:13px;line-height:1.55;color:var(--t1);white-space:pre-wrap;word-break:break-word}
+.ai-suggestion-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.ai-suggestion-error{font-size:12px;color:var(--danger);line-height:1.5}
+@media(max-width:600px){
+  .ai-reply-wrap{padding:8px 9px 0}
+  .ai-reply-bar .btn{flex:1}
+  .ai-suggestion-actions .btn{flex:1}
+}
+
 .chat-side .ld-hdr{padding-right:28px}
 .chat-loading{margin:auto;display:flex;align-items:center;gap:10px;color:var(--t2);font-size:13px}
 
@@ -2309,6 +2329,104 @@ function stopChatRefresh(){
   }
 }
 
+
+window.lastAISuggestion='';
+window.lastAIMode='quick';
+
+function closeAISuggestion(){
+  const box=$('ai-suggestion');
+  if(box) box.classList.remove('show');
+}
+
+function setAIButtonLoading(loading){
+  const btn=$('ai-suggest-btn');
+  if(!btn) return;
+  btn.disabled=loading;
+  btn.innerHTML=loading?'<span class="loader" style="width:14px;height:14px"></span> Pensando...':'✨ Sugerir resposta';
+}
+
+async function generateAIReply(leadId,mode='quick'){
+  const lead=leads.find(item=>item.id===leadId);
+  const box=$('ai-suggestion');
+  const textBox=$('ai-suggestion-text');
+  const modeBox=$('ai-suggestion-mode');
+  if(!lead||!box||!textBox) return;
+
+  window.lastAIMode=mode;
+  box.classList.add('show');
+  textBox.innerHTML='<div class="chat-loading"><div class="loader"></div>Analisando o atendimento...</div>';
+  if(modeBox) modeBox.textContent=mode==='complete'?'Completa':'Rápida';
+  setAIButtonLoading(true);
+
+  try{
+    const messages=await getLeadMessages(leadId);
+    const recentMessages=messages.slice(-20).map(message=>({
+      direction:message.direction,
+      message:String(message.message||'').slice(0,1500),
+      created_at:message.created_at
+    }));
+
+    const response=await api('POST','/ai/suggest-reply',{
+      mode,
+      lead:{
+        id:lead.id,
+        name:lead.name,
+        phone:lead.phone,
+        status:lead.status,
+        product:lead.product,
+        estimated_value:lead.estimated_value,
+        origin:lead.origin,
+        notes:lead.notes,
+        conversation_topic:lead.conversation_topic,
+        commercial_priority:lead.commercial_priority,
+        customer_relationship:lead.customer_relationship
+      },
+      messages:recentMessages
+    });
+
+    const suggestion=String(response?.suggestion||'').trim();
+    if(!suggestion) throw new Error('A IA não retornou uma sugestão.');
+
+    window.lastAISuggestion=suggestion;
+    textBox.textContent=suggestion;
+
+    if(response?.provider==='fallback'){
+      toast('Sugestão local gerada. Cadastre a chave da IA para respostas avançadas.','warn');
+    }
+  }catch(error){
+    window.lastAISuggestion='';
+    textBox.innerHTML=`<div class="ai-suggestion-error">❌ ${esc(error.message||'Erro ao gerar sugestão')}</div>`;
+  }finally{
+    setAIButtonLoading(false);
+  }
+}
+
+function useAIReply(){
+  const input=$('chat-input');
+  if(!input||!window.lastAISuggestion) return;
+  input.value=window.lastAISuggestion;
+  input.focus();
+  input.setSelectionRange(input.value.length,input.value.length);
+  closeAISuggestion();
+  toast('Sugestão colocada no campo. Revise antes de enviar.','ok');
+}
+
+async function copyAIReply(){
+  if(!window.lastAISuggestion) return;
+  try{
+    await navigator.clipboard.writeText(window.lastAISuggestion);
+    toast('Resposta copiada!','ok');
+  }catch{
+    const input=$('chat-input');
+    if(input){
+      input.value=window.lastAISuggestion;
+      input.select();
+      document.execCommand('copy');
+      toast('Resposta copiada!','ok');
+    }
+  }
+}
+
 async function sendChatMessage(leadId){
   const l=leads.find(x=>x.id===leadId);
   const input=$('chat-input');
@@ -2368,6 +2486,28 @@ async function openDetail(id){
 
         <div class="chat-messages" id="chat-messages">
           <div class="chat-loading"><div class="loader"></div>Carregando conversa...</div>
+        </div>
+
+        <div class="ai-reply-wrap">
+          <div class="ai-reply-bar">
+            <button class="btn btn-sm ai-reply-btn" id="ai-suggest-btn" onclick="generateAIReply('${l.id}','quick')">✨ Sugerir resposta</button>
+            <button class="btn btn-outline btn-sm" onclick="generateAIReply('${l.id}','complete')">🧠 Análise completa</button>
+            <span class="ai-reply-hint">A IA apenas sugere. Você revisa antes de enviar.</span>
+          </div>
+          <div class="ai-suggestion" id="ai-suggestion">
+            <div class="ai-suggestion-head">
+              <span>🧠</span>
+              <div class="ai-suggestion-title">Sugestão da IA</div>
+              <span class="ai-suggestion-mode" id="ai-suggestion-mode">Rápida</span>
+            </div>
+            <div class="ai-suggestion-text" id="ai-suggestion-text"></div>
+            <div class="ai-suggestion-actions">
+              <button class="btn btn-brand btn-sm" onclick="useAIReply()">✔ Usar resposta</button>
+              <button class="btn btn-outline btn-sm" onclick="copyAIReply()">📋 Copiar</button>
+              <button class="btn btn-outline btn-sm" onclick="generateAIReply('${l.id}',window.lastAIMode||'quick')">🔄 Gerar outra</button>
+              <button class="btn btn-ghost btn-sm" onclick="closeAISuggestion()">Cancelar</button>
+            </div>
+          </div>
         </div>
 
         <div class="chat-compose">
