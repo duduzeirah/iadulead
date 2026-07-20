@@ -2432,45 +2432,132 @@ function messageTime(value){
   return d.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
 }
 
-function renderChatMessages(messages){
+let lastChatSignature='';
+let pendingChatMessages=[];
+let chatRefreshInFlight=false;
+
+function chatMessageSignature(messages){
+  return messages.map(m=>[
+    m.id||'',
+    m.direction||'',
+    m.message||'',
+    m.created_at||''
+  ].join('|')).join('§');
+}
+
+function mergePendingMessages(messages){
+  const now=Date.now();
+
+  pendingChatMessages=pendingChatMessages.filter(item=>
+    item.leadId===activeChatLeadId &&
+    now-item.createdMs<10000
+  );
+
+  const merged=[...messages];
+
+  pendingChatMessages.forEach(pending=>{
+    const alreadySaved=messages.some(message=>
+      message.direction==='outbound' &&
+      String(message.message||'').trim()===pending.message &&
+      Math.abs(
+        new Date(message.created_at||0).getTime()-pending.createdMs
+      )<30000
+    );
+
+    if(!alreadySaved){
+      merged.push({
+        id:pending.id,
+        direction:'outbound',
+        message:pending.message,
+        created_at:pending.createdAt,
+        pending:true
+      });
+    }
+  });
+
+  return merged;
+}
+
+function renderChatMessages(messages,{force=false}={}){
   const box=$('chat-messages');
   if(!box) return;
-  if(!messages.length){
+
+  const merged=mergePendingMessages(messages);
+  const signature=chatMessageSignature(merged);
+
+  if(!force && signature===lastChatSignature) return;
+  lastChatSignature=signature;
+
+  const wasNearBottom=
+    box.scrollHeight-box.scrollTop-box.clientHeight<100;
+
+  if(!merged.length){
     box.innerHTML=`<div class="chat-empty"><div style="font-size:34px;margin-bottom:8px">💬</div>Nenhuma mensagem registrada para este contato.</div>`;
     return;
   }
-  box.innerHTML=messages.map(m=>`
-    <div class="chat-bubble ${m.direction==='outbound'?'outbound':'inbound'}">
+
+  box.innerHTML=merged.map(m=>`
+    <div class="chat-bubble ${m.direction==='outbound'?'outbound':'inbound'}" ${m.pending?'style="opacity:.72"':''}>
       <div>${esc(m.message||'')}</div>
-      <div class="chat-meta">${m.direction==='outbound'?'Equipe':'Cliente'} • ${messageTime(m.created_at)}</div>
+      <div class="chat-meta">
+        ${m.direction==='outbound'?'Equipe':'Cliente'} •
+        ${m.pending?'enviando…':messageTime(m.created_at)}
+      </div>
     </div>
   `).join('');
-  box.scrollTop=box.scrollHeight;
+
+  if(wasNearBottom || force){
+    box.scrollTop=box.scrollHeight;
+  }
 }
 
 async function refreshOpenChat(silent=true){
-  if(!activeChatLeadId) return;
+  if(!activeChatLeadId || chatRefreshInFlight) return;
+
+  chatRefreshInFlight=true;
   try{
     const messages=await getLeadMessages(activeChatLeadId);
     renderChatMessages(messages);
   }catch(e){
     if(!silent) toast(e.message||'Erro ao carregar conversa','err');
+  }finally{
+    chatRefreshInFlight=false;
   }
 }
 
 function startChatRefresh(leadId){
   stopChatRefresh();
   activeChatLeadId=leadId;
-  chatRefreshTimer=setInterval(()=>refreshOpenChat(true),2000);
+  lastChatSignature='';
+
+  chatRefreshTimer=setInterval(()=>{
+    if(document.visibilityState==='visible'){
+      refreshOpenChat(true);
+    }
+  },1000);
 }
 
 function stopChatRefresh(){
   activeChatLeadId=null;
+  lastChatSignature='';
+  pendingChatMessages=[];
   if(chatRefreshTimer){
     clearInterval(chatRefreshTimer);
     chatRefreshTimer=null;
   }
 }
+
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState==='visible' && activeChatLeadId){
+    refreshOpenChat(true);
+  }
+});
+
+window.addEventListener('focus',()=>{
+  if(activeChatLeadId){
+    refreshOpenChat(true);
+  }
+});
 
 
 window.lastAISuggestion='';
@@ -2578,7 +2665,20 @@ async function sendChatMessage(leadId){
 
   if(!l||!message) return;
 
+  const pendingId=`pending-${Date.now()}-${Math.random()}`;
+  const pending={
+    id:pendingId,
+    leadId,
+    message,
+    createdAt:new Date().toISOString(),
+    createdMs:Date.now()
+  };
+
+  pendingChatMessages.push(pending);
+  input.value='';
+  renderChatMessages([], {force:true});
   setBtnLoading(btn,true);
+
   try{
     const body={lead_id:l.id,message};
 
@@ -2592,16 +2692,20 @@ async function sendChatMessage(leadId){
       }
     }
 
-    input.value='';
     toast('Mensagem enviada','ok');
 
-    await new Promise(resolve=>setTimeout(resolve,700));
+    await new Promise(resolve=>setTimeout(resolve,150));
     await refreshOpenChat(false);
-    await loadLeads();
 
-    const page=q('.sb-item.active')?.dataset?.page||'dashboard';
-    renderPage(page);
+    loadLeads().then(()=>{
+      const page=q('.sb-item.active')?.dataset?.page||'dashboard';
+      renderPage(page);
+    }).catch(()=>{});
   }catch(e){
+    pendingChatMessages=pendingChatMessages.filter(item=>item.id!==pendingId);
+    input.value=message;
+    lastChatSignature='';
+    await refreshOpenChat(true);
     toast(e.message||'Erro ao enviar mensagem','err');
   }finally{
     setBtnLoading(btn,false);
@@ -2744,7 +2848,7 @@ async function openDetail(id){
 
   try{
     const messages=await getLeadMessages(id);
-    renderChatMessages(messages);
+    renderChatMessages(messages,{force:true});
     startChatRefresh(id);
     setTimeout(()=>$('chat-input')?.focus(),100);
   }catch(e){
