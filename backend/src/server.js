@@ -125,6 +125,11 @@ app.use(
   '/api/ai',
   require('./routes/ai')
 );
+
+app.use(
+  '/api/realtime',
+  require('./routes/realtime')
+);
 // 404
 app.use((req, res) => {
   res.status(404).json({
