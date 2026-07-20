@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { auth } = require('../middleware/auth');
 const { evolutionRequest } = require('../services/evolutionService');
+const { publish } = require('../services/realtimeService');
 
 const {
   processMessageAutomation
@@ -299,6 +300,20 @@ router.post('/', async (req, res) => {
           automation.reason
       }
     );
+
+    publish(tenantId, 'message.created', {
+      lead_id,
+      direction: 'outbound',
+      message: cleanMessage,
+      previous_status: lead.status,
+      new_status: finalStatus,
+      created_at: new Date().toISOString()
+    });
+
+    publish(tenantId, 'lead.updated', {
+      lead_id,
+      status: finalStatus
+    });
 
     return res.status(200).json({
       success: true,
