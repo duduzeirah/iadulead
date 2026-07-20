@@ -15,17 +15,22 @@ function statusLabel(status) {
     inativo: 'Atendimento encerrado',
     sumido: 'Não respondeu'
   };
+
   return labels[status] || status || 'Não informado';
 }
 
 function localFallback({ lead, messages, mode }) {
   const name = clean(lead?.name, 80).split(' ')[0] || 'Olá';
   const product = clean(lead?.product, 150);
+
   const lastInbound = [...(messages || [])]
     .reverse()
     .find(message => message.direction !== 'outbound');
 
-  const customerText = clean(lastInbound?.message, 500).toLowerCase();
+  const customerText = clean(
+    lastInbound?.message,
+    500
+  ).toLowerCase();
 
   if (/pre[cç]o|valor|quanto|parcela/.test(customerText)) {
     return `${name}, posso te explicar certinho os valores${product ? ` de ${product}` : ''} e as formas de pagamento. Para eu te orientar melhor, você prefere pagamento à vista ou parcelado?`;
@@ -47,10 +52,17 @@ function localFallback({ lead, messages, mode }) {
 }
 
 function buildInput({ lead, messages, mode }) {
-  const history = (messages || []).slice(-20).map(message => {
-    const author = message.direction === 'outbound' ? 'ATENDENTE' : 'CLIENTE';
-    return `${author}: ${clean(message.message, 1500)}`;
-  }).join('\n');
+  const history = (messages || [])
+    .slice(-20)
+    .map(message => {
+      const author =
+        message.direction === 'outbound'
+          ? 'ATENDENTE'
+          : 'CLIENTE';
+
+      return `${author}: ${clean(message.message, 1500)}`;
+    })
+    .join('\n');
 
   return `
 Você é o assistente comercial do CRM Iadu Lead.
@@ -86,39 +98,84 @@ async function suggestReply(payload) {
   if (!apiKey) {
     return {
       suggestion: localFallback(payload),
-      provider: 'fallback'
+      provider: 'fallback',
+      fallback_reason: 'missing_api_key'
     };
   }
 
-  const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+  const model =
+    process.env.OPENAI_MODEL ||
+    'gpt-5-mini';
 
-  const response = await fetch(OPENAI_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model,
-      input: buildInput(payload),
-      max_output_tokens: 220
-    })
-  });
+  const response = await fetch(
+    OPENAI_URL,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model,
+        input: buildInput(payload),
+        max_output_tokens: 220,
+        store: false
+      })
+    }
+  );
 
-  const data = await response.json();
+  let data = {};
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
 
   if (!response.ok) {
-    const error = new Error(
-      data?.error?.message || 'Erro ao consultar a inteligência artificial.'
-    );
+    const apiMessage =
+      data?.error?.message ||
+      'Erro ao consultar a inteligência artificial.';
+
+    const apiCode =
+      data?.error?.code ||
+      data?.error?.type ||
+      '';
+
+    const normalizedMessage =
+      String(apiMessage).toLowerCase();
+
+    const normalizedCode =
+      String(apiCode).toLowerCase();
+
+    const isQuotaError =
+      response.status === 429 ||
+      normalizedCode.includes('quota') ||
+      normalizedMessage.includes('quota') ||
+      normalizedMessage.includes('billing');
+
+    if (isQuotaError) {
+      return {
+        suggestion: localFallback(payload),
+        provider: 'fallback',
+        fallback_reason: 'openai_quota'
+      };
+    }
+
+    const error = new Error(apiMessage);
     error.status = response.status;
     throw error;
   }
 
-  const suggestion = clean(data.output_text, 2000);
+  const suggestion =
+    clean(data.output_text, 2000);
 
   if (!suggestion) {
-    throw new Error('A inteligência artificial não retornou uma resposta.');
+    return {
+      suggestion: localFallback(payload),
+      provider: 'fallback',
+      fallback_reason: 'empty_openai_response'
+    };
   }
 
   return {
@@ -128,4 +185,6 @@ async function suggestReply(payload) {
   };
 }
 
-module.exports = { suggestReply };
+module.exports = {
+  suggestReply
+};
