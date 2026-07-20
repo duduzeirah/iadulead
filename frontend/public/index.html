@@ -1187,6 +1187,10 @@ let intelligenceSummary = null;
 let intelligenceHistory = [];
 let intelligenceFilter = 'all';
 let intelligenceLoaded = false;
+let realtimeSource = null;
+let realtimeReconnectTimer = null;
+let realtimeConnected = false;
+let realtimeLeadRefreshTimer = null;
 
 const PIPELINE_DEFAULTS={
   novo:{label:'Novos Leads',description:'Contato recém-chegado',color:'#00C566',order:1},
@@ -1273,6 +1277,106 @@ async function api(method, path, body) {
   return data;
 }
 
+
+// ============================================================
+//  TEMPO REAL — SSE POR EMPRESA
+// ============================================================
+function realtimeUrl(){
+  return `${API}/realtime?token=${encodeURIComponent(token||'')}`;
+}
+
+function scheduleRealtimeLeadRefresh(){
+  clearTimeout(realtimeLeadRefreshTimer);
+  realtimeLeadRefreshTimer=setTimeout(async()=>{
+    try{
+      await loadLeads();
+      const page=q('.sb-item.active')?.dataset?.page||'dashboard';
+      renderPage(page);
+      loadDash();
+    }catch(e){}
+  },180);
+}
+
+function configureChatFallback(){
+  if(!activeChatLeadId) return;
+
+  if(chatRefreshTimer){
+    clearInterval(chatRefreshTimer);
+    chatRefreshTimer=null;
+  }
+
+  const interval=realtimeConnected?15000:3000;
+
+  chatRefreshTimer=setInterval(()=>{
+    if(document.visibilityState==='visible'){
+      refreshOpenChat(true);
+    }
+  },interval);
+}
+
+function disconnectRealtime(){
+  clearTimeout(realtimeReconnectTimer);
+  realtimeReconnectTimer=null;
+  realtimeConnected=false;
+
+  if(realtimeSource){
+    realtimeSource.close();
+    realtimeSource=null;
+  }
+}
+
+function connectRealtime(){
+  disconnectRealtime();
+  if(!token || typeof EventSource==='undefined') return;
+
+  const source=new EventSource(realtimeUrl());
+  realtimeSource=source;
+
+  source.addEventListener('connected',()=>{
+    realtimeConnected=true;
+    configureChatFallback();
+  });
+
+  source.addEventListener('message.created',event=>{
+    let payload={};
+    try{payload=JSON.parse(event.data||'{}')}catch(e){}
+
+    if(payload.lead_id && payload.lead_id===activeChatLeadId){
+      refreshOpenChat(true);
+    }
+
+    scheduleRealtimeLeadRefresh();
+  });
+
+  source.addEventListener('lead.updated',event=>{
+    let payload={};
+    try{payload=JSON.parse(event.data||'{}')}catch(e){}
+
+    const lead=leads.find(item=>item.id===payload.lead_id);
+    if(lead && payload.status) lead.status=payload.status;
+
+    scheduleRealtimeLeadRefresh();
+  });
+
+  source.addEventListener('whatsapp.status',()=>{
+    if(q('.sb-item.active')?.dataset?.page==='config'){
+      loadWhatsAppConnection?.();
+    }
+  });
+
+  source.onerror=()=>{
+    if(realtimeSource!==source) return;
+
+    realtimeConnected=false;
+    source.close();
+    realtimeSource=null;
+    configureChatFallback();
+
+    clearTimeout(realtimeReconnectTimer);
+    realtimeReconnectTimer=setTimeout(connectRealtime,3000);
+  };
+}
+
 // ============================================================
 //  BOOT
 // ============================================================
@@ -1302,6 +1406,7 @@ function showApp() {
   populateUser();
   loadPipelineSettings();
   loadAll();
+  connectRealtime();
 }
 function populateUser() {
   $('sb-av').textContent=ini(me.name);
@@ -2388,6 +2493,7 @@ async function doRegister(){
 
 async function logout(){
   confirm$('⏻','Sair','Deseja mesmo sair do Iadu Lead?',()=>{
+    disconnectRealtime();
     token=null; localStorage.removeItem('iadulead_token');
     $('app').classList.remove('visible'); $('app').style.display='none';
     showAuth(); leads=[]; reminders=[]; templates={};
@@ -2529,12 +2635,7 @@ function startChatRefresh(leadId){
   stopChatRefresh();
   activeChatLeadId=leadId;
   lastChatSignature='';
-
-  chatRefreshTimer=setInterval(()=>{
-    if(document.visibilityState==='visible'){
-      refreshOpenChat(true);
-    }
-  },1000);
+  configureChatFallback();
 }
 
 function stopChatRefresh(){
