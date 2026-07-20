@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { auth } = require('../middleware/auth');
 const { evolutionRequest, publicBackendUrl, safeInstanceName, extractQr, extractState } = require('../services/evolutionService');
+const { publish } = require('../services/realtimeService');
 
 const {
   processMessageAutomation
@@ -360,6 +361,11 @@ router.post('/webhook', async (req, res) => {
 
       const phoneNumber = String(data?.wuid || data?.number || '').split('@')[0].replace(/\D/g, '') || null;
       await updateConnection(tenantId, { status, phoneNumber, metadata: data || {} });
+      publish(tenantId, 'whatsapp.status', {
+        status,
+        phone_number: phoneNumber,
+        instance_name: instanceName
+      });
       return res.status(200).json({ success: true, status });
     }
 
@@ -772,6 +778,22 @@ router.post('/webhook', async (req, res) => {
           automation.reason
       }
     );
+
+    publish(tenantId, 'message.created', {
+      lead_id: leadId,
+      direction,
+      message: cleanMessage,
+      previous_status: currentStatus,
+      new_status: finalStatus,
+      is_new_lead: isNewLead,
+      created_at: new Date().toISOString()
+    });
+
+    publish(tenantId, 'lead.updated', {
+      lead_id: leadId,
+      status: finalStatus,
+      is_new_lead: isNewLead
+    });
 
     return res.status(200).json({
       success: true,
