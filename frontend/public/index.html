@@ -1335,6 +1335,7 @@ function connectRealtime(){
   source.addEventListener('connected',()=>{
     realtimeConnected=true;
     configureChatFallback();
+    if(activeChatLeadId) refreshOpenChat(true);
   });
 
   source.addEventListener('message.created',event=>{
@@ -2526,6 +2527,23 @@ async function saveLead(){
 
 function resetLeadModal(){$('ml-id').value='';['ml-n','ml-p','ml-pr','ml-v','ml-e','ml-ob'].forEach(i=>$(i).value='');$('ml-st').value='novo';$('ml-or').value='WhatsApp';$('ml-tg').value='';$('m-lead-title').textContent='➕ Novo Lead'}
 
+
+async function syncWhatsAppHistory(leadId, silent=false){
+  const btn=$('sync-chat-btn');
+  if(btn) setBtnLoading(btn,true);
+  try{
+    const result=await api('POST',`/whatsapp/evolution/sync/${leadId}`,{});
+    if(!silent) toast(`Sincronização concluída: ${result.imported||0} mensagem(ns) importada(s).`,'ok');
+    await refreshOpenChat(true);
+    return result;
+  }catch(e){
+    if(!silent) toast(e.message||'Erro ao sincronizar histórico','err');
+    return null;
+  }finally{
+    if(btn) setBtnLoading(btn,false);
+  }
+}
+
 async function getLeadMessages(leadId){
   const data=await api('GET',`/messages/${leadId}`);
   return Array.isArray(data)?data:(data.messages||[]);
@@ -2829,6 +2847,7 @@ async function openDetail(id){
             <div class="chat-head-name">${esc(l.name)}</div>
             <div class="chat-head-phone">${esc(l.phone)}</div>
           </div>
+          <button class="btn btn-outline btn-sm" id="sync-chat-btn" onclick="syncWhatsAppHistory('${l.id}',false)">🔄 Sincronizar</button>
           <span class="pill pill-${l.status}">${pillLabel(l.status)}</span>
         </div>
 
@@ -2948,9 +2967,17 @@ async function openDetail(id){
   openM('m-detail');
 
   try{
-    const messages=await getLeadMessages(id);
+    let messages=await getLeadMessages(id);
     renderChatMessages(messages,{force:true});
     startChatRefresh(id);
+
+    if(!messages.length){
+      const synced=await syncWhatsAppHistory(id,true);
+      if(synced?.imported){
+        messages=await getLeadMessages(id);
+        renderChatMessages(messages,{force:true});
+      }
+    }
     setTimeout(()=>$('chat-input')?.focus(),100);
   }catch(e){
     const box=$('chat-messages');
