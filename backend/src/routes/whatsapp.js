@@ -178,6 +178,88 @@ router.post('/evolution/disconnect', auth, async (req, res) => {
   }
 });
 
+
+function extractEvolutionMessageText(item) {
+  const msg = item?.message || item?.data?.message || {};
+  return String(
+    msg.conversation ||
+    msg.extendedTextMessage?.text ||
+    msg.imageMessage?.caption ||
+    msg.videoMessage?.caption ||
+    msg.documentMessage?.caption ||
+    (msg.audioMessage ? '🎵 Áudio' : '') ||
+    (msg.imageMessage ? '🖼️ Imagem' : '') ||
+    (msg.videoMessage ? '🎥 Vídeo' : '') ||
+    (msg.documentMessage ? `📎 Documento${msg.documentMessage.fileName ? ': '+msg.documentMessage.fileName : ''}` : '') ||
+    (msg.stickerMessage ? '🏷️ Figurinha' : '') ||
+    (msg.contactMessage ? '👤 Contato' : '') ||
+    (msg.locationMessage ? '📍 Localização' : '') ||
+    '[Mensagem não textual]'
+  ).trim();
+}
+
+router.post('/evolution/sync/:leadId', auth, async (req, res) => {
+  try {
+    const tenantId = req.user.tenant_id;
+    const { leadId } = req.params;
+    const leadResult = await db.query(
+      'SELECT id, phone FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1',
+      [leadId, tenantId]
+    );
+    const lead = leadResult.rows[0];
+    if (!lead) return res.status(404).json({ error: 'Lead não encontrado.' });
+
+    const connection = await getTenantConnection(tenantId, { bootstrap: false });
+    if (!connection?.instance_name) return res.status(409).json({ error: 'WhatsApp não conectado.' });
+
+    let phone = String(lead.phone || '').replace(/\D/g, '');
+    if (!phone.startsWith('55')) phone = `55${phone}`;
+    const remoteJid = `${phone}@s.whatsapp.net`;
+
+    const response = await evolutionRequest(
+      'post',
+      `/chat/findMessages/${encodeURIComponent(connection.instance_name)}`,
+      { where: { key: { remoteJid } }, page: 1, offset: 1000 }
+    );
+
+    const payload = response.data || {};
+    const records = payload.messages?.records || payload.records || payload.messages || payload.data || [];
+    const list = Array.isArray(records) ? records : [];
+    let imported = 0;
+
+    for (const item of list) {
+      const key = item.key || item.data?.key || {};
+      const direction = key.fromMe === true ? 'outbound' : 'inbound';
+      const text = extractEvolutionMessageText(item);
+      const rawTs = item.messageTimestamp || item.timestamp || item.createdAt || item.data?.messageTimestamp;
+      const createdAt = /^\d+$/.test(String(rawTs || ''))
+        ? new Date(Number(rawTs) * (String(rawTs).length <= 10 ? 1000 : 1))
+        : new Date(rawTs || Date.now());
+
+      const result = await db.query(
+        `INSERT INTO messages (tenant_id, lead_id, direction, message, message_type, created_at)
+         SELECT $1,$2,$3,$4,'text',$5
+         WHERE NOT EXISTS (
+           SELECT 1 FROM messages
+           WHERE tenant_id=$1 AND lead_id=$2 AND direction=$3 AND message=$4
+           AND created_at BETWEEN $5::timestamptz - INTERVAL '3 seconds'
+                              AND $5::timestamptz + INTERVAL '3 seconds'
+         )`,
+        [tenantId, leadId, direction, text, createdAt.toISOString()]
+      );
+      imported += result.rowCount || 0;
+    }
+
+    publish(tenantId, 'message.created', { lead_id: leadId, synced: true, imported });
+    return res.json({ success: true, found: list.length, imported });
+  } catch (error) {
+    console.error('Erro ao sincronizar histórico:', error.response?.data || error);
+    return res.status(error.response?.status || 500).json({
+      error: error.response?.data?.message || error.message || 'Erro ao sincronizar histórico.'
+    });
+  }
+});
+
 router.get('/meta/start', auth, async (req, res) => {
   return res.status(501).json({
     error: 'A conexão oficial da Meta está preparada na interface, mas depende do cadastro do aplicativo e do Embedded Signup.'
@@ -494,20 +576,29 @@ router.post('/webhook', async (req, res) => {
     =====================================================
     */
 
+    const rawMessage = data.message || {};
     const message =
-      data.message?.conversation ||
-      data.message
-        ?.extendedTextMessage?.text ||
-      data.message
-        ?.imageMessage?.caption ||
-      data.message
-        ?.videoMessage?.caption ||
-      data.message
-        ?.documentMessage?.caption ||
+      rawMessage.conversation ||
+      rawMessage.extendedTextMessage?.text ||
+      rawMessage.imageMessage?.caption ||
+      rawMessage.videoMessage?.caption ||
+      rawMessage.documentMessage?.caption ||
+      rawMessage.buttonsResponseMessage?.selectedDisplayText ||
+      rawMessage.listResponseMessage?.title ||
       '';
 
-    const cleanMessage =
-      String(message || '').trim();
+    const mediaLabel =
+      rawMessage.audioMessage ? '🎵 Áudio' :
+      rawMessage.imageMessage ? '🖼️ Imagem' :
+      rawMessage.videoMessage ? '🎥 Vídeo' :
+      rawMessage.documentMessage ? `📎 Documento${rawMessage.documentMessage.fileName ? ': '+rawMessage.documentMessage.fileName : ''}` :
+      rawMessage.stickerMessage ? '🏷️ Figurinha' :
+      rawMessage.contactMessage ? '👤 Contato' :
+      rawMessage.locationMessage ? '📍 Localização' :
+      rawMessage.reactionMessage ? `Reação ${rawMessage.reactionMessage.text || ''}`.trim() :
+      '';
+
+    const cleanMessage = String(message || mediaLabel || '[Mensagem não textual]').trim();
 
     const fromMe =
       key.fromMe === true;
