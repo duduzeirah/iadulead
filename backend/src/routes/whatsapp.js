@@ -10,6 +10,154 @@ const {
 
 const router = express.Router();
 
+let mediaSchemaReady = false;
+
+async function ensureMessageMediaSchema() {
+  if (mediaSchemaReady) return;
+
+  await db.query(`
+    ALTER TABLE messages
+      ADD COLUMN IF NOT EXISTS external_message_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS media_type VARCHAR(40),
+      ADD COLUMN IF NOT EXISTS media_mime_type VARCHAR(150),
+      ADD COLUMN IF NOT EXISTS media_file_name VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS media_data TEXT,
+      ADD COLUMN IF NOT EXISTS media_duration_seconds INTEGER,
+      ADD COLUMN IF NOT EXISTS media_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_messages_external_message_id
+    ON messages(tenant_id, external_message_id)
+  `);
+
+  mediaSchemaReady = true;
+}
+
+function normalizedEventName(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '.');
+}
+
+function messageKey(item) {
+  return item?.key || item?.data?.key || {};
+}
+
+function rawEvolutionMessage(item) {
+  return item?.message || item?.data?.message || {};
+}
+
+function mediaInfoFromMessage(rawMessage = {}) {
+  const entries = [
+    ['audio', rawMessage.audioMessage],
+    ['image', rawMessage.imageMessage],
+    ['video', rawMessage.videoMessage],
+    ['document', rawMessage.documentMessage],
+    ['sticker', rawMessage.stickerMessage]
+  ];
+
+  const found = entries.find(([, value]) => Boolean(value));
+  if (!found) return null;
+
+  const [type, media] = found;
+
+  return {
+    type,
+    mimeType: media?.mimetype || media?.mimeType || null,
+    fileName: media?.fileName || media?.filename || null,
+    durationSeconds: Number(media?.seconds || media?.duration || 0) || null
+  };
+}
+
+async function fetchMediaBase64(instanceName, item) {
+  const key = messageKey(item);
+  const message = rawEvolutionMessage(item);
+
+  const bodies = [
+    { message: { key, message }, convertToMp4: false },
+    { message: item, convertToMp4: false },
+    { key, message, convertToMp4: false }
+  ];
+
+  for (const body of bodies) {
+    try {
+      const response = await evolutionRequest(
+        'post',
+        `/chat/getBase64FromMediaMessage/${encodeURIComponent(instanceName)}`,
+        body
+      );
+
+      const payload = response.data || {};
+      const base64 =
+        payload.base64 ||
+        payload.data?.base64 ||
+        payload.media?.base64 ||
+        null;
+
+      if (base64) {
+        return {
+          base64: String(base64).replace(/^data:[^;]+;base64,/, ''),
+          mimeType:
+            payload.mimetype ||
+            payload.mimeType ||
+            payload.data?.mimetype ||
+            null,
+          fileName:
+            payload.fileName ||
+            payload.filename ||
+            payload.data?.fileName ||
+            null
+        };
+      }
+    } catch (error) {
+      const status = error.response?.status;
+      if (![400, 404, 422].includes(status)) {
+        console.warn('Falha ao buscar mídia:', error.response?.data || error.message);
+      }
+    }
+  }
+
+  return null;
+}
+
+function recordBelongsToPhone(item, phone) {
+  const key = messageKey(item);
+  const candidates = [
+    key.remoteJid,
+    key.remoteJidAlt,
+    key.participant,
+    key.participantAlt,
+    item?.remoteJid,
+    item?.remoteJidAlt,
+    item?.senderPn,
+    item?.data?.remoteJid,
+    item?.data?.remoteJidAlt,
+    item?.data?.senderPn
+  ]
+    .filter(Boolean)
+    .map(value => String(value).split('@')[0].replace(/\D/g, ''));
+
+  const normalizedPhone = String(phone || '').replace(/\D/g, '');
+  const localPhone = normalizedPhone.startsWith('55')
+    ? normalizedPhone.slice(2)
+    : normalizedPhone;
+
+  return candidates.some(candidate => {
+    const localCandidate = candidate.startsWith('55')
+      ? candidate.slice(2)
+      : candidate;
+
+    return (
+      candidate === normalizedPhone ||
+      localCandidate === localPhone ||
+      candidate.endsWith(localPhone) ||
+      normalizedPhone.endsWith(localCandidate)
+    );
+  });
+}
+
 
 /*
 =====================================================
@@ -200,62 +348,313 @@ function extractEvolutionMessageText(item) {
 
 router.post('/evolution/sync/:leadId', auth, async (req, res) => {
   try {
+    await ensureMessageMediaSchema();
+
     const tenantId = req.user.tenant_id;
     const { leadId } = req.params;
+
     const leadResult = await db.query(
       'SELECT id, phone FROM leads WHERE id = $1 AND tenant_id = $2 LIMIT 1',
       [leadId, tenantId]
     );
+
     const lead = leadResult.rows[0];
-    if (!lead) return res.status(404).json({ error: 'Lead não encontrado.' });
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead não encontrado.' });
+    }
 
     const connection = await getTenantConnection(tenantId, { bootstrap: false });
-    if (!connection?.instance_name) return res.status(409).json({ error: 'WhatsApp não conectado.' });
+    if (!connection?.instance_name) {
+      return res.status(409).json({ error: 'WhatsApp não conectado.' });
+    }
 
     let phone = String(lead.phone || '').replace(/\D/g, '');
     if (!phone.startsWith('55')) phone = `55${phone}`;
+
     const remoteJid = `${phone}@s.whatsapp.net`;
+    let list = [];
 
-    const response = await evolutionRequest(
-      'post',
-      `/chat/findMessages/${encodeURIComponent(connection.instance_name)}`,
-      { where: { key: { remoteJid } }, page: 1, offset: 1000 }
-    );
+    const extractRecords = payload => {
+      const records =
+        payload?.messages?.records ||
+        payload?.records ||
+        payload?.messages ||
+        payload?.data?.messages?.records ||
+        payload?.data?.records ||
+        payload?.data ||
+        [];
 
-    const payload = response.data || {};
-    const records = payload.messages?.records || payload.records || payload.messages || payload.data || [];
-    const list = Array.isArray(records) ? records : [];
+      return Array.isArray(records) ? records : [];
+    };
+
+    try {
+      const exactResponse = await evolutionRequest(
+        'post',
+        `/chat/findMessages/${encodeURIComponent(connection.instance_name)}`,
+        {
+          where: { key: { remoteJid } },
+          page: 1,
+          offset: 1000
+        }
+      );
+
+      list = extractRecords(exactResponse.data || {});
+    } catch (error) {
+      console.warn(
+        'Busca exata do histórico falhou, tentando busca ampla:',
+        error.response?.data || error.message
+      );
+    }
+
+    /*
+      Algumas versões da Evolution armazenam a conversa usando @lid
+      e por isso a busca direta pelo número volta vazia. Nesse caso,
+      buscamos o lote recente e filtramos localmente pelo número real
+      e pelos campos alternativos remoteJidAlt/participantAlt/senderPn.
+    */
+    if (!list.length) {
+      const broadResponse = await evolutionRequest(
+        'post',
+        `/chat/findMessages/${encodeURIComponent(connection.instance_name)}`,
+        {
+          where: {},
+          page: 1,
+          offset: 1000
+        }
+      );
+
+      const allRecords = extractRecords(broadResponse.data || {});
+      list = allRecords.filter(item => recordBelongsToPhone(item, phone));
+    }
+
+    list.sort((a, b) => {
+      const aTs = Number(a.messageTimestamp || a.timestamp || a.data?.messageTimestamp || 0);
+      const bTs = Number(b.messageTimestamp || b.timestamp || b.data?.messageTimestamp || 0);
+      return aTs - bTs;
+    });
+
     let imported = 0;
+    let mediaImported = 0;
 
     for (const item of list) {
-      const key = item.key || item.data?.key || {};
+      const key = messageKey(item);
+      const rawMessage = rawEvolutionMessage(item);
       const direction = key.fromMe === true ? 'outbound' : 'inbound';
       const text = extractEvolutionMessageText(item);
-      const rawTs = item.messageTimestamp || item.timestamp || item.createdAt || item.data?.messageTimestamp;
+      const externalMessageId = key.id || item.id || item.messageId || null;
+      const media = mediaInfoFromMessage(rawMessage);
+
+      const rawTs =
+        item.messageTimestamp ||
+        item.timestamp ||
+        item.createdAt ||
+        item.data?.messageTimestamp;
+
       const createdAt = /^\d+$/.test(String(rawTs || ''))
         ? new Date(Number(rawTs) * (String(rawTs).length <= 10 ? 1000 : 1))
         : new Date(rawTs || Date.now());
 
+      let mediaPayload = null;
+
+      if (media && externalMessageId) {
+        mediaPayload = await fetchMediaBase64(connection.instance_name, item);
+      }
+
       const result = await db.query(
-        `INSERT INTO messages (tenant_id, lead_id, direction, message, message_type, created_at)
-         SELECT $1,$2,$3,$4,'text',$5
-         WHERE NOT EXISTS (
-           SELECT 1 FROM messages
-           WHERE tenant_id=$1 AND lead_id=$2 AND direction=$3 AND message=$4
-           AND created_at BETWEEN $5::timestamptz - INTERVAL '3 seconds'
-                              AND $5::timestamptz + INTERVAL '3 seconds'
-         )`,
-        [tenantId, leadId, direction, text, createdAt.toISOString()]
+        `
+        INSERT INTO messages (
+          tenant_id,
+          lead_id,
+          direction,
+          message,
+          message_type,
+          created_at,
+          external_message_id,
+          media_type,
+          media_mime_type,
+          media_file_name,
+          media_data,
+          media_duration_seconds,
+          media_metadata
+        )
+        SELECT
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          $12,
+          $13::jsonb
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM messages
+          WHERE tenant_id = $1
+            AND lead_id = $2
+            AND (
+              ($7::text IS NOT NULL AND external_message_id = $7::text)
+              OR (
+                direction::text = $14::text
+                AND message = $4
+                AND created_at BETWEEN
+                  $6::timestamptz - INTERVAL '3 seconds'
+                  AND
+                  $6::timestamptz + INTERVAL '3 seconds'
+              )
+            )
+        )
+        `,
+        [
+          tenantId,
+          leadId,
+          direction,
+          text,
+          media?.type || 'text',
+          createdAt.toISOString(),
+          externalMessageId,
+          media?.type || null,
+          mediaPayload?.mimeType || media?.mimeType || null,
+          mediaPayload?.fileName || media?.fileName || null,
+          mediaPayload?.base64 || null,
+          media?.durationSeconds || null,
+          JSON.stringify({ source: 'evolution_sync' }),
+          direction
+        ]
       );
-      imported += result.rowCount || 0;
+
+      const count = result.rowCount || 0;
+      imported += count;
+      if (count && mediaPayload?.base64) mediaImported += 1;
     }
 
-    publish(tenantId, 'message.created', { lead_id: leadId, synced: true, imported });
-    return res.json({ success: true, found: list.length, imported });
+    publish(tenantId, 'message.created', {
+      lead_id: leadId,
+      synced: true,
+      imported,
+      media_imported: mediaImported
+    });
+
+    return res.json({
+      success: true,
+      found: list.length,
+      imported,
+      media_imported: mediaImported
+    });
   } catch (error) {
     console.error('Erro ao sincronizar histórico:', error.response?.data || error);
+
     return res.status(error.response?.status || 500).json({
-      error: error.response?.data?.message || error.message || 'Erro ao sincronizar histórico.'
+      error:
+        error.response?.data?.message ||
+        error.message ||
+        'Erro ao sincronizar histórico.'
+    });
+  }
+});
+
+router.get('/media/:messageId', async (req, res) => {
+  try {
+    await ensureMessageMediaSchema();
+
+    let tenantId = null;
+
+    const authHeader = String(req.headers.authorization || '');
+    const bearerToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
+
+    const token = bearerToken || String(req.query.token || '').trim();
+
+    if (!token) {
+      return res.status(401).json({ error: 'Token não informado.' });
+    }
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    tenantId =
+      decoded.tenant_id ||
+      decoded.tenantId ||
+      decoded.user?.tenant_id ||
+      null;
+
+    if (!tenantId) {
+      const userId =
+        decoded.id ||
+        decoded.user_id ||
+        decoded.userId ||
+        decoded.sub ||
+        decoded.user?.id;
+
+      if (userId) {
+        const userResult = await db.query(
+          'SELECT tenant_id FROM users WHERE id = $1 LIMIT 1',
+          [userId]
+        );
+
+        tenantId = userResult.rows[0]?.tenant_id || null;
+      }
+    }
+
+    if (!tenantId) {
+      return res.status(401).json({ error: 'Token sem empresa vinculada.' });
+    }
+
+    const { messageId } = req.params;
+
+    const result = await db.query(
+      `
+      SELECT
+        media_data,
+        media_mime_type,
+        media_file_name
+      FROM messages
+      WHERE id = $1
+        AND tenant_id = $2
+      LIMIT 1
+      `,
+      [messageId, tenantId]
+    );
+
+    const message = result.rows[0];
+
+    if (!message?.media_data) {
+      return res.status(404).json({
+        error: 'Mídia ainda não disponível. Clique em Sincronizar.'
+      });
+    }
+
+    const buffer = Buffer.from(message.media_data, 'base64');
+
+    res.setHeader(
+      'Content-Type',
+      message.media_mime_type || 'application/octet-stream'
+    );
+
+    res.setHeader('Content-Length', buffer.length);
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+
+    if (message.media_file_name) {
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename="${String(message.media_file_name).replace(/"/g, '')}"`
+      );
+    }
+
+    return res.send(buffer);
+  } catch (error) {
+    console.error('Erro ao abrir mídia:', error);
+
+    return res.status(401).json({
+      error:
+        error.name === 'TokenExpiredError'
+          ? 'Sessão expirada.'
+          : 'Não foi possível abrir a mídia.'
     });
   }
 });
@@ -276,11 +675,14 @@ async function saveMessage({
   tenantId,
   leadId,
   direction,
-  message
+  message,
+  externalMessageId = null,
+  media = null,
+  mediaPayload = null
 }) {
-  if (!leadId || !message) {
-    return;
-  }
+  if (!leadId || !message) return;
+
+  await ensureMessageMediaSchema();
 
   await db.query(
     `
@@ -290,31 +692,46 @@ async function saveMessage({
       direction,
       message,
       message_type,
-      created_at
+      created_at,
+      external_message_id,
+      media_type,
+      media_mime_type,
+      media_file_name,
+      media_data,
+      media_duration_seconds,
+      media_metadata
     )
     SELECT
-      $1,
-      $2,
-      $3,
-      $4,
-      'text',
-      NOW()
+      $1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,$12::jsonb
     WHERE NOT EXISTS (
       SELECT 1
       FROM messages
       WHERE tenant_id = $1
-      AND lead_id = $2
-      AND direction = $3
-      AND message = $4
-      AND created_at >=
-        NOW() - INTERVAL '15 seconds'
+        AND lead_id = $2
+        AND (
+          ($6::text IS NOT NULL AND external_message_id = $6::text)
+          OR (
+            direction::text = $13::text
+            AND message = $4
+            AND created_at >= NOW() - INTERVAL '15 seconds'
+          )
+        )
     )
     `,
     [
       tenantId,
       leadId,
       direction,
-      message
+      message,
+      media?.type || 'text',
+      externalMessageId,
+      media?.type || null,
+      mediaPayload?.mimeType || media?.mimeType || null,
+      mediaPayload?.fileName || media?.fileName || null,
+      mediaPayload?.base64 || null,
+      media?.durationSeconds || null,
+      JSON.stringify({ source: 'evolution_webhook' }),
+      direction
     ]
   );
 }
@@ -422,8 +839,10 @@ WEBHOOK DA EVOLUTION API
 
 router.post('/webhook', async (req, res) => {
   try {
-    const event = req.body.event;
-    const data = req.body.data;
+    await ensureMessageMediaSchema();
+    const event = normalizedEventName(req.body.event);
+    const incomingData = req.body.data;
+    const data = Array.isArray(incomingData) ? incomingData[0] : incomingData;
     const instanceName = req.body.instance || data?.instance || req.query.instance;
     const connection = await getConnectionByInstance(instanceName);
 
@@ -737,16 +1156,31 @@ router.post('/webhook', async (req, res) => {
     =====================================================
     */
 
+    const externalMessageId =
+      key.id ||
+      data.id ||
+      data.messageId ||
+      null;
+
+    const media =
+      mediaInfoFromMessage(rawMessage);
+
+    const mediaPayload =
+      media && externalMessageId
+        ? await fetchMediaBase64(
+            instanceName,
+            data
+          )
+        : null;
+
     await saveMessage({
-      tenantId:
-        tenantId,
-
+      tenantId,
       leadId,
-
       direction,
-
-      message:
-        cleanMessage
+      message: cleanMessage,
+      externalMessageId,
+      media,
+      mediaPayload
     });
 
     /*
