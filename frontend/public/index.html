@@ -1342,7 +1342,7 @@ function connectRealtime(){
     let payload={};
     try{payload=JSON.parse(event.data||'{}')}catch(e){}
 
-    if(payload.lead_id && payload.lead_id===activeChatLeadId){
+    if(payload.lead_id && String(payload.lead_id)===String(activeChatLeadId)){
       refreshOpenChat(true);
     }
 
@@ -2565,7 +2565,9 @@ function chatMessageSignature(messages){
     m.id||'',
     m.direction||'',
     m.message||'',
-    m.created_at||''
+    m.created_at||'',
+    m.media_type||'',
+    m.media_path||''
   ].join('|')).join('§');
 }
 
@@ -2620,15 +2622,36 @@ function renderChatMessages(messages,{force=false}={}){
     return;
   }
 
-  box.innerHTML=merged.map(m=>`
-    <div class="chat-bubble ${m.direction==='outbound'?'outbound':'inbound'}" ${m.pending?'style="opacity:.72"':''}>
-      <div>${esc(m.message||'')}</div>
-      <div class="chat-meta">
-        ${m.direction==='outbound'?'Equipe':'Cliente'} •
-        ${m.pending?'enviando…':messageTime(m.created_at)}
+  box.innerHTML=merged.map(m=>{
+    const mediaUrl=m.media_path
+      ? `${API}${m.media_path}?token=${encodeURIComponent(token||'')}`
+      : '';
+
+    let mediaHtml='';
+
+    if(m.media_type==='audio'){
+      mediaHtml=mediaUrl
+        ? `<audio controls preload="metadata" style="width:260px;max-width:100%;margin-top:7px" src="${mediaUrl}"></audio>`
+        : `<div style="margin-top:7px;color:var(--t2);font-size:11px">🎵 Áudio ainda não baixado. Clique em Sincronizar.</div>`;
+    }else if(m.media_type==='image' && mediaUrl){
+      mediaHtml=`<img src="${mediaUrl}" alt="Imagem recebida" style="display:block;max-width:280px;width:100%;border-radius:9px;margin-top:7px">`;
+    }else if(m.media_type==='video' && mediaUrl){
+      mediaHtml=`<video controls preload="metadata" style="display:block;max-width:300px;width:100%;border-radius:9px;margin-top:7px" src="${mediaUrl}"></video>`;
+    }else if(m.media_type==='document' && mediaUrl){
+      mediaHtml=`<a class="btn btn-sm btn-outline" style="margin-top:7px" href="${mediaUrl}" target="_blank" rel="noopener">📎 Abrir ${esc(m.media_file_name||'documento')}</a>`;
+    }
+
+    return `
+      <div class="chat-bubble ${m.direction==='outbound'?'outbound':'inbound'}" ${m.pending?'style="opacity:.72"':''}>
+        <div>${esc(m.message||'')}</div>
+        ${mediaHtml}
+        <div class="chat-meta">
+          ${m.direction==='outbound'?'Equipe':'Cliente'} •
+          ${m.pending?'enviando…':messageTime(m.created_at)}
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 
   if(wasNearBottom || force){
     box.scrollTop=box.scrollHeight;
