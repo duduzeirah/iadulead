@@ -4,6 +4,7 @@ const { auth } = require('../middleware/auth');
 const { evolutionRequest } = require('../services/evolutionService');
 const { publish } = require('../services/realtimeService');
 const { refreshLeadContext } = require('../services/leadContextService');
+const { ensureTeamSchema, getUserProfile } = require('../services/teamService');
 
 const {
   processMessageAutomation
@@ -48,6 +49,34 @@ router.post('/', async (req, res) => {
       });
     }
 
+    await ensureTeamSchema();
+    const attendant = await getUserProfile(req.user.id, tenantId);
+    let outgoingMessage = cleanMessage;
+
+    if (attendant?.signature_enabled && attendant.signature_mode !== 'off') {
+      let shouldSign = attendant.signature_mode === 'always';
+
+      if (attendant.signature_mode === 'first_message') {
+        const previous = await db.query(`
+          SELECT id FROM messages
+          WHERE tenant_id = $1 AND lead_id = $2 AND direction = 'outbound'
+            AND sent_by_user_id = $3
+            AND created_at >= NOW() - INTERVAL '12 hours'
+          LIMIT 1
+        `, [tenantId, lead_id, req.user.id]);
+        shouldSign = previous.rows.length === 0;
+      }
+
+      if (shouldSign) {
+        const signature = String(attendant.signature_text || `Olá, aqui é o ${attendant.name}.`).trim();
+        if (signature && !cleanMessage.toLowerCase().startsWith(signature.toLowerCase())) {
+          outgoingMessage = `${signature}
+
+${cleanMessage}`;
+        }
+      }
+    }
+
     /*
     =====================================================
     BUSCA O LEAD
@@ -84,6 +113,12 @@ router.post('/', async (req, res) => {
 
     const lead =
       leadResult.rows[0];
+
+    await db.query(`
+      UPDATE leads
+      SET assigned_to = COALESCE(assigned_to, $1), updated_at = NOW()
+      WHERE id = $2 AND tenant_id = $3
+    `, [req.user.id, lead_id, tenantId]);
 
     /*
     =====================================================
@@ -152,7 +187,7 @@ router.post('/', async (req, res) => {
     const evolutionResponse = await evolutionRequest(
       'post',
       `/message/sendText/${encodeURIComponent(connection.instance_name)}`,
-      { number: phone, text: cleanMessage }
+      { number: phone, text: outgoingMessage }
     );
 
     /*
@@ -169,6 +204,8 @@ router.post('/', async (req, res) => {
         direction,
         message,
         message_type,
+        sent_by_user_id,
+        sent_by_name,
         created_at
       )
       SELECT
@@ -177,6 +214,8 @@ router.post('/', async (req, res) => {
         'outbound',
         $3,
         'text',
+        $4,
+        $5,
         NOW()
       WHERE NOT EXISTS (
         SELECT 1
@@ -192,7 +231,9 @@ router.post('/', async (req, res) => {
       [
         tenantId,
         lead_id,
-        cleanMessage
+        outgoingMessage,
+        req.user.id,
+        attendant?.name || req.user.name || 'Equipe'
       ]
     );
 
@@ -305,7 +346,7 @@ router.post('/', async (req, res) => {
     publish(tenantId, 'message.created', {
       lead_id,
       direction: 'outbound',
-      message: cleanMessage,
+      message: outgoingMessage,
       previous_status: lead.status,
       new_status: finalStatus,
       created_at: new Date().toISOString()
@@ -328,7 +369,10 @@ router.post('/', async (req, res) => {
       phone,
 
       message:
-        cleanMessage,
+        outgoingMessage,
+
+      sent_by:
+        attendant?.name || req.user.name || 'Equipe',
 
       automation: {
         matched:
