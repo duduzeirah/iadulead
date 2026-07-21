@@ -130,6 +130,11 @@ app.use(
   '/api/realtime',
   require('./routes/realtime')
 );
+
+app.use(
+  '/api/lead-context',
+  require('./routes/leadContext')
+);
 // 404
 app.use((req, res) => {
   res.status(404).json({
