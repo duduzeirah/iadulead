@@ -413,6 +413,8 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 
 
 
+
+.team-grid{display:grid;gap:10px}.team-member{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:11px}.team-avatar{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;background:rgba(0,197,102,.15);color:var(--brand)}.team-name{font-weight:700;font-size:13px}.team-meta{font-size:10px;color:var(--t3);margin-top:3px}.team-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}.team-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.team-status-off{opacity:.55}.team-admin-note{font-size:11px;color:var(--t3);margin-top:8px}@media(max-width:600px){.team-form-grid{grid-template-columns:1fr}.team-member{grid-template-columns:38px minmax(0,1fr)}.team-actions{grid-column:1/-1;justify-content:flex-start}.team-avatar{width:36px;height:36px}}
 .lead-context-box{background:var(--bg2);border:1px solid rgba(0,197,102,.28);border-radius:var(--r);padding:14px;margin-bottom:18px}.lead-context-head{display:flex;align-items:center;gap:8px;margin-bottom:12px}.lead-context-head strong{font-size:12px;flex:1}.context-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.context-item{background:var(--bg3);border:1px solid var(--b1);border-radius:7px;padding:9px}.context-item.full{grid-column:1/-1}.context-label{font-size:9px;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}.context-value{font-size:12px;color:var(--t1);line-height:1.45}.context-loading{font-size:11px;color:var(--t3)}@media(max-width:600px){.context-grid{grid-template-columns:1fr}}
 
 /* AUTOMAÇÕES */
@@ -915,6 +917,24 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
           </div>
         </div>
 
+
+        <div class="cfg-section" id="team-settings-section">
+          <div class="cfg-title">👥 Equipe de atendimento</div>
+          <div class="alert brand"><div class="alert-icon">ℹ️</div><div>Cada pessoa entra com o próprio e-mail e senha. Ao assumir ou responder um atendimento, o nome do usuário fica registrado e pode ser apresentado ao cliente na primeira mensagem.</div></div>
+          <div id="team-create-area" style="margin-top:12px">
+            <div class="team-form-grid">
+              <div class="form-group"><label>Nome do atendente</label><input id="team-name" placeholder="Ex.: Eduardo"></div>
+              <div class="form-group"><label>E-mail de acesso</label><input id="team-email" type="email" placeholder="eduardo@empresa.com"></div>
+              <div class="form-group"><label>Senha inicial</label><input id="team-password" type="password" placeholder="Mínimo 8 caracteres"></div>
+              <div class="form-group"><label>Cargo exibido</label><input id="team-job-title" placeholder="Ex.: Consultor comercial"></div>
+              <div class="form-group"><label>Permissão</label><select id="team-role"><option value="attendant">Atendente</option><option value="admin">Administrador</option></select></div>
+            </div>
+            <div class="form-err" id="team-error"></div>
+            <button class="btn btn-brand" id="team-create-btn" onclick="createTeamMember()">➕ Cadastrar usuário</button>
+          </div>
+          <div id="team-list" class="team-grid" style="margin-top:14px"><div class="context-loading">Carregando equipe...</div></div>
+          <div class="team-admin-note">Administrador: gerencia usuários e configurações. Atendente: atende, assume e responde clientes.</div>
+        </div>
         <div class="cfg-section">
           <div class="cfg-title">👤 Meu Perfil</div>
           <div class="form-group"><label>Nome</label><input type="text" id="cfg-nome"></div>
@@ -1166,9 +1186,11 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
 // ============================================================
 // PRODUÇÃO: troque pela URL do Render.com depois do deploy
 // Desenvolvimento local: http://localhost:3001
-const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? 'http://localhost:8080/api'
-  : 'https://iadulead-production.up.railway.app/api'; // ← TROQUE AQUI
+const API =
+  (window.location.hostname === 'localhost' ||
+   window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3001/api'
+    : 'https://iadulead-production.up.railway.app/api'; // ← TROQUE AQUI
 
 // ============================================================
 //  STATE
@@ -1180,6 +1202,8 @@ let reminders = [];
 let templates = {};
 let todosFilter = null;
 let dashData = {};
+let teamMembers = [];
+let teamCanManage = false;
 let activeChatLeadId = null;
 let chatRefreshTimer = null;
 let automaticRefreshTimer = null;
@@ -1523,6 +1547,55 @@ function resetPipelineSettings(){
   });
 }
 
+
+// ============================================================
+//  EQUIPE DE ATENDIMENTO
+// ============================================================
+function teamRoleLabel(role){return role==='admin'?'Administrador':'Atendente'}
+function renderTeam(){
+  const wrap=$('team-list');
+  if(!wrap)return;
+  const createArea=$('team-create-area');
+  if(createArea) createArea.style.display=teamCanManage?'block':'none';
+  if(!teamMembers.length){wrap.innerHTML='<div class="empty"><div class="ei">👥</div><h3>Nenhum usuário</h3><p>Cadastre a primeira pessoa da equipe.</p></div>';return}
+  wrap.innerHTML=teamMembers.map(member=>{
+    const mine=String(member.id)===String(me?.id);
+    return `<div class="team-member ${member.is_active?'':'team-status-off'}">
+      <div class="team-avatar">${esc(ini(member.name||member.email))}</div>
+      <div><div class="team-name">${esc(member.name)} ${mine?'<span class="badge badge-green">Você</span>':''}</div><div class="team-meta">${esc(member.email)} • ${esc(member.job_title||teamRoleLabel(member.role))} • ${member.is_active?'Ativo':'Desativado'}</div><div class="team-meta">Assinatura: ${member.signature_enabled&&member.signature_mode!=='off'?esc(member.signature_text||('Olá, aqui é o '+member.name+'.')):'Desativada'}</div></div>
+      <div class="team-actions">${teamCanManage?`
+        <button class="btn btn-outline btn-sm" onclick="editTeamSignature('${member.id}')">✍️ Assinatura</button>
+        <button class="btn btn-outline btn-sm" onclick="resetTeamPassword('${member.id}')">🔑 Senha</button>
+        ${mine?'':`<button class="btn ${member.is_active?'btn-danger':'btn-brand'} btn-sm" onclick="toggleTeamMember('${member.id}',${!member.is_active})">${member.is_active?'Desativar':'Ativar'}</button>`}
+      `:''}</div>
+    </div>`;
+  }).join('');
+}
+async function loadTeam(){
+  const wrap=$('team-list');
+  if(wrap)wrap.innerHTML='<div class="context-loading">Carregando equipe...</div>';
+  try{const r=await api('GET','/team');teamMembers=r.members||[];teamCanManage=Boolean(r.can_manage);renderTeam()}catch(e){if(wrap)wrap.innerHTML=`<div class="context-loading">${esc(e.message||'Erro ao carregar equipe')}</div>`}
+}
+async function createTeamMember(){
+  const btn=$('team-create-btn'),err=$('team-error');if(err)err.textContent='';
+  const body={name:$('team-name').value.trim(),email:$('team-email').value.trim(),password:$('team-password').value,job_title:$('team-job-title').value.trim(),role:$('team-role').value};
+  if(!body.name||!body.email||!body.password){if(err)err.textContent='Preencha nome, e-mail e senha.';return}
+  setBtnLoading(btn,true);try{await api('POST','/team',body);['team-name','team-email','team-password','team-job-title'].forEach(id=>$(id).value='');toast('Usuário cadastrado!','ok');await loadTeam()}catch(e){if(err)err.textContent=e.message||'Erro ao cadastrar'}finally{setBtnLoading(btn,false)}
+}
+async function toggleTeamMember(id,isActive){
+  try{await api('PATCH',`/team/${id}`,{is_active:isActive});toast(isActive?'Usuário ativado':'Usuário desativado','ok');await loadTeam()}catch(e){toast(e.message||'Erro ao alterar usuário','err')}
+}
+async function resetTeamPassword(id){
+  const password=prompt('Digite a nova senha (mínimo 8 caracteres):');if(password===null)return;if(password.length<8){toast('A senha precisa ter no mínimo 8 caracteres','err');return}
+  try{await api('POST',`/team/${id}/reset-password`,{password});toast('Senha redefinida','ok')}catch(e){toast(e.message||'Erro ao redefinir senha','err')}
+}
+async function editTeamSignature(id){
+  const member=teamMembers.find(x=>String(x.id)===String(id));if(!member)return;
+  const text=prompt('Texto de apresentação enviado ao cliente:',member.signature_text||`Olá, aqui é o ${member.name}.`);if(text===null)return;
+  const mode=prompt('Modo: first_message (primeira mensagem), always (todas) ou off (desativada):',member.signature_mode||'first_message');if(mode===null)return;
+  try{await api('PATCH',`/team/${id}`,{signature_text:text,signature_mode:mode,signature_enabled:mode!=='off'});toast('Assinatura atualizada','ok');await loadTeam()}catch(e){toast(e.message||'Erro ao atualizar assinatura','err')}
+}
+
 // ============================================================
 //  LOAD ALL DATA
 // ============================================================
@@ -1589,7 +1662,7 @@ function renderPage(page) {
   else if(page==='templates') renderTemplates();
   else if(page==='automacoes') loadAutomations();
   else if(page==='inteligencia') loadIntelligence();
-  else if(page==='config'){ renderPipelineConfig(); loadWhatsAppConnection(); }
+  else if(page==='config'){ renderPipelineConfig(); loadWhatsAppConnection(); loadTeam(); }
   else if(sm[page]) renderStatusPage(page,sm[page]);
 }
 
