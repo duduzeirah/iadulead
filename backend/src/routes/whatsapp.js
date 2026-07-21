@@ -27,6 +27,17 @@ async function ensureMessageMediaSchema() {
   `);
 
   await db.query(`
+    ALTER TABLE leads
+      ADD COLUMN IF NOT EXISTS whatsapp_jid VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS whatsapp_jid_alt VARCHAR(255)
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_leads_whatsapp_jid
+    ON leads(tenant_id, whatsapp_jid)
+  `);
+
+  await db.query(`
     CREATE INDEX IF NOT EXISTS idx_messages_external_message_id
     ON messages(tenant_id, external_message_id)
   `);
@@ -78,7 +89,9 @@ async function fetchMediaBase64(instanceName, item) {
   const bodies = [
     { message: { key, message }, convertToMp4: false },
     { message: item, convertToMp4: false },
-    { key, message, convertToMp4: false }
+    { message: { key }, convertToMp4: false },
+    { key, message, convertToMp4: false },
+    { key, convertToMp4: false }
   ];
 
   for (const body of bodies) {
@@ -94,6 +107,8 @@ async function fetchMediaBase64(instanceName, item) {
         payload.base64 ||
         payload.data?.base64 ||
         payload.media?.base64 ||
+        payload.data?.data?.base64 ||
+        payload.data?.data ||
         null;
 
       if (base64) {
@@ -937,44 +952,11 @@ router.post('/webhook', async (req, res) => {
     Não usamos o número do LID como telefone real.
     */
 
-    if (
-      !phoneJid &&
-      String(remoteJid).endsWith('@lid')
-    ) {
-      console.log(
-        '⚠️ Mensagem recebida somente com @lid:',
-        {
-          remoteJid:
-            key.remoteJid,
+    const lidOnly = !phoneJid && String(remoteJid).endsWith('@lid');
 
-          remoteJidAlt:
-            key.remoteJidAlt,
-
-          participant:
-            key.participant,
-
-          participantAlt:
-            key.participantAlt,
-
-          senderPn:
-            data.senderPn,
-
-          fromMe:
-            key.fromMe
-        }
-      );
-
-      return res.status(200).json({
-        ignored: true,
-        reason:
-          'Telefone verdadeiro não enviado pela Evolution'
-      });
-    }
-
-    let phone =
-      String(remoteJid)
-        .split('@')[0]
-        .replace(/\D/g, '');
+    // Quando a Evolution entrega somente @lid, não descartamos mais a mensagem.
+    // Guardamos o JID e usamos um identificador provisório até o número real aparecer.
+    let phone = String(remoteJid).split('@')[0].replace(/\D/g, '');
 
     if (!phone) {
       return res.status(200).json({
@@ -984,10 +966,12 @@ router.post('/webhook', async (req, res) => {
       });
     }
 
-    if (!phone.startsWith('55')) {
-      phone =
-        `55${phone}`;
+    if (!lidOnly && !phone.startsWith('55')) {
+      phone = `55${phone}`;
     }
+
+    const primaryJid = String(key.remoteJid || remoteJid || '');
+    const alternateJid = String(phoneJid || key.remoteJidAlt || data.remoteJidAlt || data.senderPn || '');
 
     /*
     =====================================================
@@ -1052,13 +1036,17 @@ router.post('/webhook', async (req, res) => {
           status
         FROM leads
         WHERE tenant_id = $1
-        AND phone = $2
+          AND (
+            phone = $2
+            OR whatsapp_jid = $3
+            OR whatsapp_jid_alt = $3
+            OR whatsapp_jid = $4
+            OR whatsapp_jid_alt = $4
+          )
+        ORDER BY CASE WHEN phone = $2 THEN 0 ELSE 1 END
         LIMIT 1
         `,
-        [
-          tenantId,
-          phone
-        ]
+        [tenantId, phone, primaryJid, alternateJid]
       );
 
     let leadId =
@@ -1102,6 +1090,8 @@ router.post('/webhook', async (req, res) => {
             status,
             origin,
             notes,
+            whatsapp_jid,
+            whatsapp_jid_alt,
             last_contact_at,
             created_at,
             updated_at
@@ -1113,6 +1103,8 @@ router.post('/webhook', async (req, res) => {
             'novo'::lead_status,
             'WhatsApp',
             $4,
+            $5,
+            $6,
             NOW(),
             NOW(),
             NOW()
@@ -1125,7 +1117,9 @@ router.post('/webhook', async (req, res) => {
             tenantId,
             name,
             phone,
-            cleanMessage || null
+            cleanMessage || null,
+            primaryJid || null,
+            alternateJid || null
           ]
         );
 
@@ -1143,11 +1137,21 @@ router.post('/webhook', async (req, res) => {
       );
 
     } else {
-      leadId =
-        existingLead.rows[0].id;
+      leadId = existingLead.rows[0].id;
+      currentStatus = existingLead.rows[0].status;
 
-      currentStatus =
-        existingLead.rows[0].status;
+      await db.query(
+        `UPDATE leads
+         SET whatsapp_jid = COALESCE(NULLIF($3, ''), whatsapp_jid),
+             whatsapp_jid_alt = COALESCE(NULLIF($4, ''), whatsapp_jid_alt),
+             phone = CASE
+               WHEN $5 = FALSE AND phone ~ '^[0-9]+$' THEN $2
+               ELSE phone
+             END,
+             updated_at = NOW()
+         WHERE id = $1 AND tenant_id = $6`,
+        [leadId, phone, primaryJid, alternateJid, lidOnly, tenantId]
+      );
     }
 
     /*
