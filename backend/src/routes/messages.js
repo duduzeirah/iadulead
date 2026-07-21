@@ -16,7 +16,9 @@ router.get('/:leadId', async (req, res) => {
         ADD COLUMN IF NOT EXISTS media_file_name VARCHAR(255),
         ADD COLUMN IF NOT EXISTS media_data TEXT,
         ADD COLUMN IF NOT EXISTS media_duration_seconds INTEGER,
-        ADD COLUMN IF NOT EXISTS media_metadata JSONB NOT NULL DEFAULT '{}'::jsonb
+        ADD COLUMN IF NOT EXISTS media_metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS sent_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        ADD COLUMN IF NOT EXISTS sent_by_name VARCHAR(255)
     `);
 
     const { leadId } = req.params;
@@ -48,6 +50,8 @@ router.get('/:leadId', async (req, res) => {
          media_mime_type,
          media_file_name,
          media_duration_seconds,
+         sent_by_user_id,
+         sent_by_name,
          CASE
            WHEN media_data IS NOT NULL
            THEN '/whatsapp/media/' || id::text
