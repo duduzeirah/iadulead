@@ -135,6 +135,11 @@ app.use(
   '/api/lead-context',
   require('./routes/leadContext')
 );
+
+app.use(
+  '/api/team',
+  require('./routes/team')
+);
 // 404
 app.use((req, res) => {
   res.status(404).json({
