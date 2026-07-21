@@ -3,6 +3,7 @@ const db = require('../db');
 const { auth } = require('../middleware/auth');
 const { evolutionRequest } = require('../services/evolutionService');
 const { publish } = require('../services/realtimeService');
+const { refreshLeadContext } = require('../services/leadContextService');
 
 const {
   processMessageAutomation
@@ -314,6 +315,10 @@ router.post('/', async (req, res) => {
       lead_id,
       status: finalStatus
     });
+
+    refreshLeadContext({ tenantId, leadId: lead_id })
+      .then(() => publish(tenantId, 'context.updated', { lead_id: lead_id }))
+      .catch(error => console.warn('Contexto comercial não atualizado:', error.message));
 
     return res.status(200).json({
       success: true,
