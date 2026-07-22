@@ -4,6 +4,7 @@ const { auth } = require('../middleware/auth');
 const { evolutionRequest, publicBackendUrl, safeInstanceName, extractQr, extractState } = require('../services/evolutionService');
 const { publish } = require('../services/realtimeService');
 const { scheduleLeadContextRefresh } = require('../services/contextQueueService');
+const { ensureContactIdentitySchema, resolveLead, bindIdentifiers } = require('../services/contactIdentityService');
 
 const {
   processMessageAutomation
@@ -14,6 +15,7 @@ const router = express.Router();
 let mediaSchemaReady = false;
 
 async function ensureMessageMediaSchema() {
+  await ensureContactIdentitySchema();
   if (mediaSchemaReady) return;
 
   await db.query(`
@@ -364,6 +366,15 @@ router.post('/evolution/sync/:leadId', auth, async (req, res) => {
       return res.status(404).json({ error: 'Lead não encontrado.' });
     }
 
+    const syncPhone = String(lead.phone || '').replace(/\D/g, '');
+    if (syncPhone) {
+      const normalizedSyncPhone = syncPhone.startsWith('55') ? syncPhone : `55${syncPhone}`;
+      await bindIdentifiers({ tenantId, leadId, identifiers: [
+        { type: 'phone', value: normalizedSyncPhone },
+        { type: 'jid', value: `${normalizedSyncPhone}@s.whatsapp.net` }
+      ]});
+    }
+
     const connection = await getTenantConnection(tenantId, { bootstrap: false });
     if (!connection?.instance_name) {
       return res.status(409).json({ error: 'WhatsApp não conectado.' });
@@ -679,7 +690,8 @@ async function saveMessage({
   message,
   externalMessageId = null,
   media = null,
-  mediaPayload = null
+  mediaPayload = null,
+  identifiers = []
 }) {
   if (!leadId || !message) return;
 
@@ -700,10 +712,12 @@ async function saveMessage({
       media_file_name,
       media_data,
       media_duration_seconds,
-      media_metadata
+      media_metadata,
+      contact_identifier,
+      contact_identifiers
     )
     SELECT
-      $1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,$12::jsonb
+      $1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,$12::jsonb,$14,$15::jsonb
     WHERE NOT EXISTS (
       SELECT 1
       FROM messages
@@ -732,7 +746,9 @@ async function saveMessage({
       mediaPayload?.base64 || null,
       media?.durationSeconds || null,
       JSON.stringify({ source: 'evolution_webhook' }),
-      direction
+      direction,
+      identifiers[0]?.value || null,
+      JSON.stringify(identifiers.map(item => item.value))
     ]
   );
 }
@@ -891,110 +907,14 @@ router.post('/webhook', async (req, res) => {
 
     /*
     =====================================================
-    IDENTIFICA O CONTATO
+    IDENTIFICA O CONTATO POR TELEFONE, JID OU LID
     =====================================================
     */
 
-    const jidCandidates = [
-      key.remoteJidAlt,
-      key.participantAlt,
-      data.remoteJidAlt,
-      data.senderPn,
-      key.remoteJid,
-      key.participant
-    ].filter(Boolean);
-
-    const phoneJid =
-      jidCandidates.find(jid =>
-        String(jid).endsWith(
-          '@s.whatsapp.net'
-        )
-      );
-
-    const remoteJid =
-      phoneJid ||
-      key.remoteJid ||
-      '';
-
-    /*
-    Ignora grupos e status do WhatsApp.
-    */
-
-    if (
-      remoteJid.endsWith('@g.us') ||
-      remoteJid === 'status@broadcast'
-    ) {
-      return res.status(200).json({
-        ignored: true,
-        reason:
-          'Grupo ou status do WhatsApp'
-      });
+    const rawRemoteJid = String(key.remoteJid || data.remoteJid || '');
+    if (rawRemoteJid.endsWith('@g.us') || rawRemoteJid === 'status@broadcast') {
+      return res.status(200).json({ ignored: true, reason: 'Grupo ou status do WhatsApp' });
     }
-
-    /*
-    Quando a Evolution envia apenas @lid,
-    tentamos usar os campos alternativos.
-
-    Não usamos o número do LID como telefone real.
-    */
-
-    if (
-      !phoneJid &&
-      String(remoteJid).endsWith('@lid')
-    ) {
-      console.log(
-        '⚠️ Mensagem recebida somente com @lid:',
-        {
-          remoteJid:
-            key.remoteJid,
-
-          remoteJidAlt:
-            key.remoteJidAlt,
-
-          participant:
-            key.participant,
-
-          participantAlt:
-            key.participantAlt,
-
-          senderPn:
-            data.senderPn,
-
-          fromMe:
-            key.fromMe
-        }
-      );
-
-      return res.status(200).json({
-        ignored: true,
-        reason:
-          'Telefone verdadeiro não enviado pela Evolution'
-      });
-    }
-
-    let phone =
-      String(remoteJid)
-        .split('@')[0]
-        .replace(/\D/g, '');
-
-    if (!phone) {
-      return res.status(200).json({
-        ignored: true,
-        reason:
-          'Telefone não encontrado'
-      });
-    }
-
-    if (!phone.startsWith('55')) {
-      phone =
-        `55${phone}`;
-    }
-
-    /*
-    =====================================================
-    IDENTIFICA A MENSAGEM
-    =====================================================
-    */
 
     const rawMessage = data.message || {};
     const message =
@@ -1019,137 +939,31 @@ router.post('/webhook', async (req, res) => {
       '';
 
     const cleanMessage = String(message || mediaLabel || '[Mensagem não textual]').trim();
+    const fromMe = key.fromMe === true;
+    const direction = fromMe ? 'outbound' : 'inbound';
+    const eventType = fromMe ? 'outbound_message' : 'inbound_message';
+    const name = data.pushName || 'Contato do WhatsApp';
 
-    const fromMe =
-      key.fromMe === true;
-
-    const direction =
+    const resolved = await resolveLead({
+      tenantId,
+      data,
+      name,
+      allowCreate: !fromMe,
       fromMe
-        ? 'outbound'
-        : 'inbound';
+    });
 
-    const eventType =
-      fromMe
-        ? 'outbound_message'
-        : 'inbound_message';
-
-    const name =
-      data.pushName ||
-      phone;
-
-    /*
-    =====================================================
-    PROCURA O LEAD
-    =====================================================
-    */
-
-    const existingLead =
-      await db.query(
-        `
-        SELECT
-          id,
-          name,
-          phone,
-          status
-        FROM leads
-        WHERE tenant_id = $1
-        AND phone = $2
-        LIMIT 1
-        `,
-        [
-          tenantId,
-          phone
-        ]
-      );
-
-    let leadId =
-      null;
-
-    let currentStatus =
-      null;
-
-    let isNewLead =
-      false;
-
-    /*
-    =====================================================
-    NOVO LEAD
-    =====================================================
-    */
-
-    if (
-      existingLead.rows.length === 0
-    ) {
-      /*
-      Mensagem enviada pela equipe para um número
-      ainda não cadastrado não cria lead automaticamente.
-      */
-
-      if (fromMe) {
-        return res.status(200).json({
-          ignored: true,
-          reason:
-            'Mensagem enviada para número não cadastrado'
-        });
-      }
-
-      const newLead =
-        await db.query(
-          `
-          INSERT INTO leads (
-            tenant_id,
-            name,
-            phone,
-            status,
-            origin,
-            notes,
-            last_contact_at,
-            created_at,
-            updated_at
-          )
-          VALUES (
-            $1,
-            $2,
-            $3,
-            'novo'::lead_status,
-            'WhatsApp',
-            $4,
-            NOW(),
-            NOW(),
-            NOW()
-          )
-          RETURNING
-            id,
-            status
-          `,
-          [
-            tenantId,
-            name,
-            phone,
-            cleanMessage || null
-          ]
-        );
-
-      leadId =
-        newLead.rows[0].id;
-
-      currentStatus =
-        newLead.rows[0].status;
-
-      isNewLead =
-        true;
-
-      console.log(
-        `✅ Novo lead criado: ${name} | ${phone}`
-      );
-
-    } else {
-      leadId =
-        existingLead.rows[0].id;
-
-      currentStatus =
-        existingLead.rows[0].status;
+    if (!resolved.lead) {
+      return res.status(200).json({
+        ignored: true,
+        reason: 'Mensagem enviada para contato ainda não cadastrado'
+      });
     }
+
+    const identifiers = resolved.identifiers;
+    const leadId = resolved.lead.id;
+    const currentStatus = resolved.lead.status;
+    const isNewLead = new Date(resolved.lead.created_at).getTime() > Date.now() - 15000;
+    const phone = resolved.lead.phone;
 
     /*
     =====================================================
@@ -1181,7 +995,8 @@ router.post('/webhook', async (req, res) => {
       message: cleanMessage,
       externalMessageId,
       media,
-      mediaPayload
+      mediaPayload,
+      identifiers
     });
 
     /*
