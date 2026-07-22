@@ -3,7 +3,7 @@ const db = require('../db');
 const { auth } = require('../middleware/auth');
 const { evolutionRequest } = require('../services/evolutionService');
 const { publish } = require('../services/realtimeService');
-const { refreshLeadContext } = require('../services/leadContextService');
+const { scheduleLeadContextRefresh } = require('../services/contextQueueService');
 const { ensureTeamSchema, getUserProfile } = require('../services/teamService');
 
 const {
@@ -357,9 +357,11 @@ ${cleanMessage}`;
       status: finalStatus
     });
 
-    refreshLeadContext({ tenantId, leadId: lead_id })
-      .then(() => publish(tenantId, 'context.updated', { lead_id: lead_id }))
-      .catch(error => console.warn('Contexto comercial não atualizado:', error.message));
+    scheduleLeadContextRefresh({
+      tenantId,
+      leadId: lead_id,
+      delayMs: 2500
+    });
 
     return res.status(200).json({
       success: true,
