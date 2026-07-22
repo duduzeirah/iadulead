@@ -67,7 +67,7 @@ function detectLocalContext(lead, messages) {
   const latestText = compactText(latestInbound?.message || '');
 
   let purchaseIntent = 'unknown';
-  if (/quero|tenho interesse|como faço|agendar|marcar|fechar|vou fazer|pode reservar|pode marcar|onde pago/.test(allText)) {
+  if (/quero|tenho interesse|como faço|agend[ae]|agenda (um|1)|marca(r)?|marque|hor[aá]rio|encaix[ae]|fechar|vou fazer|pode reservar|pode marcar|onde pago/.test(allText)) {
     purchaseIntent = 'high';
   } else if (/valor|pre[cç]o|quanto|parcela|pagamento|funciona|como [ée]|tem desconto|forma de pagamento/.test(allText)) {
     purchaseIntent = 'medium';
@@ -124,7 +124,7 @@ function detectLocalContext(lead, messages) {
   }
 
   let recommendedStatus = lead.status || 'novo';
-  if (purchaseIntent === 'high' && /agendar|marcar|pode reservar|pode marcar/.test(allText)) recommendedStatus = 'fechado';
+  if (purchaseIntent === 'high' && /(marcado|confirmado|pode ser|fechado|reservado)/.test(allText) && /agend|hor[aá]rio|marca/.test(allText)) recommendedStatus = 'fechado';
   else if (inbound.length && lead.status === 'novo') recommendedStatus = 'atendendo';
   else if (outbound.length && latestInbound && lead.status === 'atendendo') recommendedStatus = 'aguardando';
 
@@ -353,6 +353,27 @@ async function refreshLeadContext({ tenantId, leadId, force = false }) {
     leadId,
     tenantId
   ]);
+
+  // Movimentação automática conservadora.
+  const safeTransitions = {
+    novo: ['atendendo'],
+    aguardando: ['atendendo', 'fechado'],
+    inativo: ['atendendo'],
+    sumido: ['atendendo'],
+    atendendo: ['aguardando', 'fechado']
+  };
+
+  const allowed = safeTransitions[lead.status] || [];
+  if (
+    allowed.includes(context.recommendedStatus) &&
+    Number(context.confidence || 0) >= 65
+  ) {
+    await db.query(`
+      UPDATE leads
+      SET status = $1::lead_status, updated_at = NOW()
+      WHERE id = $2 AND tenant_id = $3
+    `, [context.recommendedStatus, leadId, tenantId]);
+  }
 
   const result = await db.query(`
     INSERT INTO lead_commercial_context (
