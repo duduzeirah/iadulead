@@ -3,7 +3,7 @@ const db = require('../db');
 const { auth } = require('../middleware/auth');
 const { evolutionRequest, publicBackendUrl, safeInstanceName, extractQr, extractState } = require('../services/evolutionService');
 const { publish } = require('../services/realtimeService');
-const { refreshLeadContext } = require('../services/leadContextService');
+const { scheduleLeadContextRefresh } = require('../services/contextQueueService');
 
 const {
   processMessageAutomation
@@ -1321,9 +1321,11 @@ router.post('/webhook', async (req, res) => {
       is_new_lead: isNewLead
     });
 
-    refreshLeadContext({ tenantId, leadId: leadId })
-      .then(() => publish(tenantId, 'context.updated', { lead_id: leadId }))
-      .catch(error => console.warn('Contexto comercial não atualizado:', error.message));
+    scheduleLeadContextRefresh({
+      tenantId,
+      leadId: leadId,
+      delayMs: 2500
+    });
 
     return res.status(200).json({
       success: true,
