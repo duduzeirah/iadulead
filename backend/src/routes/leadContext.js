@@ -33,7 +33,7 @@ router.get('/:leadId', async (req, res) => {
 
 router.post('/:leadId/refresh', async (req, res) => {
   try {
-    const context = await refreshLeadContext({ tenantId: req.user.tenant_id, leadId: req.params.leadId });
+    const context = await refreshLeadContext({ tenantId: req.user.tenant_id, leadId: req.params.leadId, force: true });
     if (!context) return res.status(404).json({ error: 'Lead não encontrado' });
     publish(req.user.tenant_id, 'context.updated', { lead_id: req.params.leadId });
     res.json(context);
