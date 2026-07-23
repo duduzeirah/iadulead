@@ -140,6 +140,12 @@ app.use(
   '/api/team',
   require('./routes/team')
 );
+
+app.use(
+  '/api/remarketing',
+  require('./routes/remarketing')
+);
+
 // 404
 app.use((req, res) => {
   res.status(404).json({
@@ -157,6 +163,8 @@ app.use((err, req, res, next) => {
 });
 
 // START
+require('./services/remarketingService').startRemarketingWorker();
+
 app.listen(PORT, () => {
   console.log(
     'API rodando na porta',
