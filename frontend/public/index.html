@@ -1094,7 +1094,7 @@ table.tbl tr:hover td{background:rgba(255,255,255,.015)}
           <div class="cfg-title">🤖 Automações</div>
           <div class="toggle-row"><div class="toggle-label"><h4>Follow-up automático para fantasmas</h4><p>Mensagem após 48h sem resposta</p></div><label class="switch"><input type="checkbox" checked><span class="switch-slider"></span></label></div>
           <div class="toggle-row"><div class="toggle-label"><h4>Alerta de novo lead</h4><p>Notificação ao receber novo contato</p></div><label class="switch"><input type="checkbox" checked><span class="switch-slider"></span></label></div>
-          <div class="toggle-row"><div class="toggle-label"><h4>Remarketing automático (30 dias)</h4><p>Contato automático após inatividade</p></div><label class="switch"><input type="checkbox"><span class="switch-slider"></span></label></div>
+          <div class="toggle-row"><div class="toggle-label"><h4>Remarketing automático (30 dias)</h4><p>Contato automático após inatividade</p></div><label class="switch"><input type="checkbox" id="rm-auto-toggle" onchange="saveRemarketingSettings()"><span class="switch-slider"></span></label></div>
           <div class="toggle-row"><div class="toggle-label"><h4>Mensagem de boas-vindas</h4><p>Enviar template ao novo contato</p></div><label class="switch"><input type="checkbox" checked><span class="switch-slider"></span></label></div>
         </div>
         <div class="cfg-section">
@@ -2668,6 +2668,8 @@ function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').
 //  REMARKETING
 // ============================================================
 function renderRemarketing() {
+  loadRemarketingCampaigns();
+  loadRemarketingSettings();
   const targets=leads.filter(l=>l.status==='inativo'||l.status==='sumido');
   $('rm-cnt').textContent=targets.length;
   $('rt-pend').innerHTML=targets.length?targets.map(l=>`
@@ -2679,7 +2681,7 @@ function renderRemarketing() {
         <span class="rm-reason" style="background:${l.status==='inativo'?'rgba(240,77,91,.15)':'rgba(255,107,157,.15)'};color:${l.status==='inativo'?'var(--danger)':'var(--pink)'}">${l.status==='inativo'?'🔴 Inativo: '+relTime(l.last_contact_at):'👻 Sumido: '+relTime(l.last_contact_at)}</span>
         ${l.notes?`<div class="rm-sub" style="margin-top:5px">${esc(l.notes)}</div>`:''}
         <div class="rm-acts">
-          <button class="btn btn-brand btn-sm" onclick="openWA('${esc(l.phone)}')">💬 Enviar Mensagem</button>
+          <button class="btn btn-brand btn-sm" onclick="openDetail('${l.id}')">💬 Enviar Mensagem</button>
           <button class="btn btn-outline btn-sm" onclick="openDetail('${l.id}')">Ver Perfil</button>
           <button class="btn btn-outline btn-sm" onclick="quickMove('${l.id}','atendendo')">↗ Reativar</button>
         </div>
@@ -3518,9 +3520,38 @@ async function deleteTpl(id){
 // ============================================================
 //  REMARKETING
 // ============================================================
-function saveCampaign(){
-  const n=$('camp-n').value.trim(); if(!n){toast('Dê um nome à campanha','warn');return}
-  closeM('m-campaign'); toast(`Campanha "${n}" criada!`,'ok');
+async function saveCampaign(){
+  const n=$('camp-n').value.trim();
+  const message=$('camp-msg').value.trim();
+  const publicText=$('camp-pub').value;
+  if(!n){toast('Dê um nome à campanha','warn');return}
+  if(!message){toast('Escreva a mensagem da campanha','warn');return}
+  const audience=publicText.startsWith('Sumidos')?'ghosts':publicText.startsWith('Todos')?'all':publicText.startsWith('Compraram')?'buyers60':'inactive';
+  try{
+    const campaign=await api('POST','/remarketing/campaigns',{name:n,message,audience});
+    closeM('m-campaign');
+    $('camp-n').value=''; $('camp-msg').value='';
+    toast(`Campanha criada para ${campaign.total_recipients||0} contato(s). Os disparos começaram.`,'ok');
+    await loadRemarketingCampaigns();
+  }catch(e){toast(e.message||'Erro ao criar campanha','err')}
+}
+
+async function loadRemarketingCampaigns(){
+  try{
+    const campaigns=await api('GET','/remarketing/campaigns');
+    const sent=$('rt-sent');
+    if(sent){
+      sent.innerHTML=campaigns.length?campaigns.map(c=>`<div class="rm-card"><div class="rm-info"><div class="rm-name">${esc(c.name)}</div><div class="rm-sub">${c.sent_count||0} enviada(s) • ${c.failed_count||0} falha(s) • ${c.total_recipients||0} destinatário(s)</div><span class="rm-reason">${esc(c.status)}</span></div></div>`).join(''):'<div class="empty"><h3>Nenhuma campanha criada</h3></div>';
+    }
+  }catch(e){}
+}
+
+async function loadRemarketingSettings(){
+  try{const s=await api('GET','/remarketing/settings'); const t=$('rm-auto-toggle'); if(t)t.checked=Boolean(s.automatic_enabled)}catch(e){}
+}
+async function saveRemarketingSettings(){
+  const enabled=Boolean($('rm-auto-toggle')?.checked);
+  try{await api('PUT','/remarketing/settings',{automatic_enabled:enabled,inactive_days:30,automatic_message:'Olá {nome}! Sentimos sua falta. Posso te ajudar com alguma coisa?'});toast(enabled?'Remarketing automático ativado':'Remarketing automático desativado','ok')}catch(e){toast(e.message||'Erro ao salvar','err')}
 }
 
 // ============================================================
