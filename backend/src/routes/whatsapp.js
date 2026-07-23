@@ -509,7 +509,7 @@ router.post('/evolution/sync/:leadId', auth, async (req, res) => {
           WHERE tenant_id = $1
             AND lead_id = $2
             AND (
-              ($7::text IS NOT NULL AND external_message_id = $7::text)
+              ($7::varchar IS NOT NULL AND external_message_id = $7::varchar)
               OR (
                 direction::text = $14::text
                 AND message = $4
@@ -717,17 +717,31 @@ async function saveMessage({
       contact_identifiers
     )
     SELECT
-      $1,$2,$3,$4,$5,NOW(),$6,$7,$8,$9,$10,$11,$12::jsonb,$14,$15::jsonb
+      $1::uuid,
+      $2::uuid,
+      $3::text,
+      $4::text,
+      $5::varchar,
+      NOW(),
+      $6::varchar,
+      $7::varchar,
+      $8::varchar,
+      $9::varchar,
+      $10::text,
+      $11::integer,
+      $12::jsonb,
+      $14::varchar,
+      $15::jsonb
     WHERE NOT EXISTS (
       SELECT 1
       FROM messages
-      WHERE tenant_id = $1
-        AND lead_id = $2
+      WHERE tenant_id = $1::uuid
+        AND lead_id = $2::uuid
         AND (
-          ($6::text IS NOT NULL AND external_message_id = $6::text)
+          ($6::varchar IS NOT NULL AND external_message_id = $6::varchar)
           OR (
             direction::text = $13::text
-            AND message = $4
+            AND message = $4::text
             AND created_at >= NOW() - INTERVAL '15 seconds'
           )
         )
